@@ -1,0 +1,63 @@
+1、docker容器的网络：
+    宿主机上面安装好docker启动后，docker的守护进程就是通过docker0为docker的容器提供网络连接的(ifconfig可以看到docker0)，docker0是linux的虚拟网桥。
+        网桥是数据链路层的网络设备，利用mac地址(网络的物理地址)来进行网络的划分和在不同网络之间传递数据。
+    linux的虚拟网桥可以设置ip，这就相当于有了一个虚拟网卡，每个docker0上面可以分配65534个不同ip(mac地址)给docker的container。没启动一个容器时候，
+        要建立网络连接，一端连接容器的网络设备、另外一端连接docker0的一个veth***接口的网络设备，实现docker0跟这个容器的网络通讯。启动一个容器就
+        会新增一个网络接口，利用ifconfig命令也可以查看到。
+    查看网桥信息命令：brctl show
+2、修改docker0的默认ip：(修改容器的ip范围)
+    ifconfig docker0 192.168.200.1 netmask 255.255.255.0
+    重启docker服务：service docker restart
+    启动的新容器的ip就是新的范围内的一个ip值了
+3、不使用docker0，使用自己新建的一个虚拟网桥给docker来使用
+    3.1：添加一个虚拟网桥
+        brctl addbr b0
+        ifconfig b0 192.168.200.1 netmask 255.255.255.0
+    3.2：修改docker守护进程启动配置项
+        /etc/default/docker 中添加DOCKER_OPS=-b=br0
+4、docker容器之间的网络连接：
+    4.1：同一个docker中的多个容器，默认是允许所有容器进行互联的
+        --icc=true默认值
+    4.2：启动进入一个容器后不停止容器并退出
+        docker run -it --name 容器的名字 镜像文件名字
+        ctrl+p+q
+        docker attch 容器名字   进入一个正在运行的容器
+    4.3：容器的ip地址是一个不可靠的连接，一个容器在重启后他的ip就会发生变化
+    4.4服务之间不要通过ip来访问：
+        4.4.1：启动一个容器时候为这个容器起一个名字
+        4.4.2：另外一个容器启动时候使用--link来连接上面的容器
+            docker run -it --name cct3 --link=cct1:website dormancypress/ctt
+                ping website就可以通，程序中使用website来访问那个容器即可，可作为主机名称(域名)访问使用
+            这样会在cct3这个容器的环境变量中增加内容，在他的/etc/hosts中增加了website的地址映射
+        4.4.3：重启docker、重启容器后他们还是可以连接的，因为--link自动进行了相应的修改
+5：让容器间不能互相访问：
+    docker的启动配置文件中增加，DOCKER_OPS=--icc=false
+6：设置某些容器可以进行连接：
+    6.1：--icc=false --iptables=true
+    6.2：使用--link访问另外一个容器
+7：docker容器与外部网络的连接：
+    本质：通过iptables的设置可以允许或者限制特定外部ip来访问特定容器的内部ip，外部ip还是访问宿主机的ip来访问到容器
+    7.1：--ip-forward=true
+        是否开启网络的流量转发，docker守护进程的启动配置中这个选项默认是开启可以转发流量的
+    7.2：sysctl net.ipv4.conf.all.forwarding 查看是否开启了流量转发
+        net.ipv4.conf.all.forwarding = 1
+    7.3：iptables -L -n  查看防火墙
+    7.4：-p 只写一个端口是，指定的是容器内端口，会随机映射宿主机上面的一个端口
+        我们创建一个容器时候，在iptables中会增加一个规则允许他被访问到
+        docker run -it -p 8099:8080 --name test3 soa/sampleprovider
+        docker port test3
+        docker run -it -p 8098:8080 --net="host" --name test4 soa/sampleprovider
+    7.5：设置iptables阻止外部某个ip访问某个容器
+        iptables -I DOCKER -s 要阻止的ip -d docker容器的ip -p TCP --dport 8080端口 -j DROP
+        这样这个被阻止的ip就不能通过访问宿主机ip来访问容器了
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,354 @@
+==================================================================================
+                    配置服务器
+==================================================================================
+1、为何使用配置服务器：
+    使用分布式配置来存储微服务应用多环境的配置内容，它实现了对服务端和客户端对Spring Environment和PropertySource抽象的映射，所以它除了适用于Spring构建的
+        应用程序，也可以在任何其他语言运行的应用程序中使用。配置服务器默认采用git来存储配置信息，这样就有助于对环境配置进行版本管理，并且可以通过git客户端
+        工具来方便的管理和访问配置内容。当然他也提供本地化文件系统的存储方式。
+2、构建Config Server：
+    2.1:pom.xml中引入spring-cloud-config-server依赖
+    2.2:Spring Boot的程序主类上面添加@EnableConfigServer注解，开启Config Server
+    2.3:application.properties中配置服务信息以及git信息
+         # git管理配置
+         spring.cloud.config.server.git.uri=http://git.oschina.net/didispace/SpringBoot-Learning/
+         spring.cloud.config.server.git.searchPaths=Chapter9-1-4/config-repo，配置仓库路径下的相对搜索位置，可以配置多个
+         spring.cloud.config.server.git.username=username
+         spring.cloud.config.server.git.password=password
+    2.4:启动该应用配置服务器就启动成功了
+    2.5:在http://git.oschina.net/didispace/SpringBoot-Learning/Chapter9-1-4/下创建了一个config-repo目录作为配置仓库
+        在这个目录下面创建了didispace.properties、didispace-dev.properties、didispace-test.properties、didispace-prod.properties 4个属性文件
+        4个文件中的属性值分别为from=git-default-1.0、from=git-dev-1.0、from=git-test-1.0、from=git-prod-1.0
+        上面是在master分支上面做的，下面创建一个config-label-test分支，并将各配置文件中的值用2.0作为后缀
+        配置服务器上面存放这多个文件，并且每个文件又有多个分支，要使用哪个分支的哪个文件自己可以组拼url即可
+        比如：要访问config-label-test分支，didispace应用的prod环境，可以通过这个url：http://localhost:7001/didispace/prod/config-label-test
+        URL与配置文件的映射关系如下：
+                  /{application}/{profile}[/{label}]
+                  /{application}-{profile}.yml
+                  /{label}/{application}-{profile}.yml
+                  /{application}-{profile}.properties
+                  /{label}/{application}-{profile}.properties
+                  上面的url会映射{application}-{profile}.properties对应的配置文件，{label}对应git上不同的分支，默认为master。
+    2.5：在微服务应用中获取配置信息：
+         在pom.xml中引入spring-cloud-starter-config依赖
+         创建bootstrap.properties配置，来指定config server，例如：
+                  spring.application.name=didispace，文件名称{application}部分
+                  spring.cloud.config.profile=dev，环境{profile}部分
+                  spring.cloud.config.label=master，分支
+                  spring.cloud.config.uri=http://localhost:7001/ ;配置服务器的地址
+         通过@Value("${from}")绑定配置服务中配置的from属性。
+         注意点；一个微服务中只能引入一个属性文件，然后使用${from}就到这个属性文件中去查找即可。
+         如果引入多个属性文件那么这样使用就有问题了吧？或者是不能引入多个属性文件。
+
+============================================================================================================
+https://yq.aliyun.com/articles/60530?spm=5176.100239.blogcont60165.22.BLe1ws      zuul：网关服务
+=============================================================================================================
+1、为何使用网关服务：
+        我们需要将权限控制这样的东西从我们的服务单元中抽离出去，而最适合这些逻辑的地方就是处于对外访问最前端的地方，我们需要一个更强大一些的均衡负载器，即网关
+            服务。通过服务网关统一向外系统提供REST API的过程中，除了具备服务路由、均衡负载功能之外，它还具备了权限控制等功能。Spring Cloud Netflix中的Zuul就
+            担任了这样的一个角色，为微服务架构提供了前门保护的作用，同时将权限控制这些较重的非业务逻辑内容迁移到服务路由层面，使得服务集群主体能够具备更高的
+            可复用性和可测试性。
+2、测试使用过程：
+     2.1：注册中心上面注册service-A和service-B两个服务
+     2.2：网关服务中，引入依赖spring-cloud-starter-zuul、spring-cloud-starter-eureka，如果不是通过指定serviceId的方式，eureka依赖不需要，但是为了对服务集群细
+            节的透明性，还是用serviceId来避免直接引用url的方式吧。
+     2.3：主类使用@EnableZuulProxy注解开启Zuul
+              @SpringCloudApplication注解，它整合了@SpringBootApplication、@EnableDiscoveryClient、@EnableCircuitBreake，主要目的还是简化配置。
+      2.4：application.properties中配置Zuul应用的基础信息，如：应用名、服务端口等。
+                 spring.application.name=api-gateway
+                 server.port=5555
+2.5：服务路由
+         通过服务路由的功能，我们在对外提供服务的时候，只需要通过暴露Zuul中配置的调用地址就可以让调用方统一的来访问我们的服务，而不需要了解具体提供服务的主机
+                信息了。
+         方式1：通过url直接映射，我们可以如下配置：
+                    # routes to url
+                    zuul.routes.api-a-url.path=/api-a-url/**
+                    zuul.routes.api-a-url.url=http://localhost:2222/
+                    该配置，定义了，所有到Zuul的中规则为：/api-a-url/**的访问都映射到http://localhost:2222/上，也就是说当我们访问
+                    http://localhost:5555/api-a-url/add?a=1&b=2的时候，Zuul会将该请求路由到：http://localhost:2222/add?a=1&b=2上。
+         方式2：对serviceId的映射：
+                通过url映射的方式对于Zuul来说，并不是特别友好，Zuul需要知道我们所有为服务的地址，才能完成所有的映射配置。而实际上，我们在实现微服务架构时，服务
+                名与服务实例地址的关系在eureka server中已经存在了，所以只需要将Zuul注册到eureka server上去发现其他服务，我们就可以实现对serviceId的映射。例如，
+                我们可以如下配置：
+                      zuul.routes.api-a.path=/api-a/**
+                      zuul.routes.api-a.serviceId=service-A
+                      zuul.routes.api-b.path=/api-b/**
+                      zuul.routes.api-b.serviceId=service-B
+                      eureka.client.serviceUrl.defaultZone=http://localhost:1111/eureka/
+2.6：接下来，我们将eureka-server、service-A、service-B以及这里用Zuul实现的服务网关启动起来，在eureka-server的控制页面中，我们可以看到分别注册了service-A、
+        service-B以及api-gateway
+2.7：尝试通过服务网关来访问service-A和service-B，根据配置的映射关系，分别访问下面的url
+        http://localhost:5555/api-a/add?a=1&b=2：通过serviceId映射访问service-A中的add服务
+        http://localhost:5555/api-b/add?a=1&b=2：通过serviceId映射访问service-B中的add服务
+        http://localhost:5555/api-a-url/add?a=1&b=2：通过url映射访问service-A中的add服务
+        推荐使用serviceId的映射方式，除了对Zuul维护上更加友好之外，serviceId映射方式还支持了断路器，对于服务故障的情况下，可以有效的防止故障蔓延到服务网关上
+            而影响整个系统的对外服务
+2.8：服务过滤：
+        我们需要利用Zuul的过滤器来实现我们对外服务的安全控制，来使客户端只能访问它应该访问到的资源。在服务网关中定义过滤器只需要继承ZuulFilter抽象类实现其定
+            义的四个抽象函数就可对请求进行拦截与过滤，比如下面的例子，定义了一个Zuul过滤器，实现了在请求被路由之前检查请求中是否有accessToken参数，若有就进行
+            路由，若没有就拒绝访问，返回401 Unauthorized错误。
+          @Override
+          public Object run() {
+           RequestContext ctx = RequestContext.getCurrentContext();
+           HttpServletRequest request = ctx.getRequest();
+           log.info(String.format("%s request to %s", request.getMethod(), request.getRequestURL().toString()));
+           Object accessToken = request.getParameter("accessToken");
+           if(accessToken == null) {
+               log.warn("access token is empty");
+               ctx.setSendZuulResponse(false); //令zuul过滤该请求，不对其进行路由
+               ctx.setResponseStatusCode(401);
+               //设置了其返回的错误码，当然我们也可以进一步优化我们的返回，比如，通过ctx.setResponseBody(body)对返回body内容进行编辑等
+               return null;
+           }
+           log.info("access token ok");
+           return null;
+          }
+        filterType：返回一个字符串代表过滤器的类型，在zuul中定义了四种不同生命周期的过滤器类型，具体如下：
+        pre：可以在请求被路由之前调用
+        routing：在路由请求时候被调用
+        post：在routing和error过滤器之后被调用
+        error：处理请求时发生错误时被调用
+        filterOrder：通过int值来定义过滤器的执行顺序
+        shouldFilter：返回一个boolean类型来判断该过滤器是否要执行，所以通过此函数可实现过滤器的开关。在上例中，我们直接返回true，所以该过滤器总是生效。
+        run：过滤器的具体逻辑。需要注意，这里我们实现了自定义过滤器之后，还需要实例化该过滤器才能生效，我们只需要在应用主类中增加如下内容：
+              @Bean
+              public AccessFilter accessFilter() {
+                    return new AccessFilter();
+              }
+2.9:启动该服务网关后，访问：
+        http://localhost:5555/api-a/add?a=1&b=2：返回401错误
+        http://localhost:5555/api-a/add?a=1&b=2&accessToken=token：正确路由到server-A，并返回计算内容
+3.0:网关服务的重要性：
+        不仅仅实现了路由功能来屏蔽诸多服务细节，更实现了服务级别、负载均衡的路由。也实现了接口权限校验与微服务业务逻辑的解耦。通过服务网关中的过滤器，在各
+            生命周期中去校验请求的内容，将原本在对外服务层做的校验前移，保证了微服务的无状态性，同时降低了微服务的测试难度，让服务本身更集中关注业务逻辑的
+            处理。实现了断路器，不会因为具体微服务的故障而导致服务网关的阻塞，依然可以对外服务。
+================================================================================
+                        注册中心ha
+================================================================================
+1、注册中心ha：
+        进行互相注册的方式来实现高可用的部署，所以我们只需要将Eureke Server配置其他可用的serviceUrl就能实现高可用部署。
+2：构建双节点的注册中心：
+    2.1：创建application-peer1.properties，作为peer1服务中心的配置，并将serviceUrl指向peer2
+        eureka.client.serviceUrl.defaultZone=http://peer2:1112/eureka/
+    2.2：创建application-peer2.properties，作为peer2服务中心的配置，并将serviceUrl指向peer1
+        eureka.client.serviceUrl.defaultZone=http://peer1:1111/eureka/
+    2.3：在/etc/hosts文件中添加对peer1和peer2的转换
+          127.0.0.1 peer1
+          127.0.0.1 peer2
+    2.4：通过spring.profiles.active属性来分别启动peer1和peer2
+          java -jar eureka-server-1.0.0.jar --spring.profiles.active=peer1
+          java -jar eureka-server-1.0.0.jar --spring.profiles.active=peer2
+    2.5：此时访问peer1的注册中心：http://localhost:1111/，如下图所示，我们可以看到registered-replicas中已经有peer2节点的eureka-server了。
+        同样地，访问peer2的注册中心：http://localhost:1112/，能看到registered-replicas中已经有peer1节点，并且这些节点在可用分片（available-replicase）之中。
+        我们也可以尝试关闭peer1，刷新http://localhost:1112/，可以看到peer1的节点变为了不可用分片（unavailable-replicas）。
+3：把provider注册到注册中心集群中去：
+    3.1：修改application.properties配置文件：
+        eureka.client.serviceUrl.defaultZone=http://peer1:1111/eureka/,http://peer2:1112/eureka/
+    3.2：可以观察到compute-service同时被注册到了peer1和peer2上。若此时断开peer1，由于compute-service同时也向peer2注册，因此在peer2上其他服务依然能访问到
+        compute-service，从而实现了高可用的服务注册中心。
+4：深入理解注册中心的集群：
+    4.1：Eureka Server的同步遵循着一个非常简单的原则：只要有一条边将节点连接，就可以进行信息传播与同步
+    4.2：假设我们有3个注册中心，我们将peer1、peer2、peer3各自都将serviceUrl指向另外两个节点。换言之，peer1、peer2、peer3是两两互相注册的。启动三个服务注册中心，
+        并将compute-service的serviceUrl指向peer1并启动，访问http://localhost:1112/，可以看到3个注册中心组成了集群，compute-service服务通过peer1同步给了与之
+        互相注册的peer2和peer3。Eureka Server的传播与同步是具备方向性的。
+    4.3：两两注册的方式可以实现集群中节点完全对等的效果，实现最高可用性集群，任何一台注册中心故障都不会影响服务的注册与发现
+    4.4：Eureka Server具备单方面有指向的服务传播与同步机制，在一些对服务发现有限制的情况下，可以利用这样的机制进行服务注册与发现的的单向控制
+
+
+================================================================================
+                                    分布式配置中心
+================================================================================
+1、配置中心的ha：
+        通常生产环境中Config Server与服务注册中心一样，我们也需要将其扩展为高可用的集群
+2：方法1：将所有的Config Server都指向同一个Git仓库，而客户端在指定Config Server位置时，只要配置Config Server外的均衡负载即可
+3：方法2：注册为服务：把配置中心看做架构中的一个微服务，只需要启动多个指向同一Git仓库位置的config-server就能实现高可用了
+    3.1：：相比之前的config-server就，加入了spring-cloud-starter-eureka，用来注册服务
+        在pom中引入了spring-cloud-starter-eureka
+    3.2：在application.properties中配置参数eureka.client.serviceUrl.defaultZone以指定服务注册中心的位置：
+          # 配置服务注册中心
+          eureka.client.serviceUrl.defaultZone=http://localhost:1111/eureka/
+          # git仓库配置
+          spring.cloud.config.server.git.uri=http://git.oschina.net/didispace/SpringCloud-Learning/
+          spring.cloud.config.server.git.searchPaths=Chapter1-1-8/config-repo
+          spring.cloud.config.server.git.username=username
+          spring.cloud.config.server.git.password=password
+    3.3：在应用主类中，新增@EnableDiscoveryClient注解，用来将config-server注册到上面配置的服务注册中心上去
+    3.4：启动该应用，并访问http://localhost:1111/，可以在Eureka Server的信息面板中看到config-server已经被注册了。
+    3.5：config-client配置：
+        3.5.1：在pom.xml的dependencies节点中新增spring-cloud-starter-eureka依赖，用来注册服务
+        3.5.2：在bootstrap.properties中，按如下配置：
+               eureka.client.serviceUrl.defaultZone=http://localhost:1111/eureka/
+               spring.cloud.config.discovery.enabled=true 开启通过服务来访问Config Server的功能
+               spring.cloud.config.discovery.serviceId=config-server 指定Config Server注册的服务名
+               spring.application.name=didispace 文件名称
+               spring.cloud.config.profile=dev  开发环境
+        3.5.3：在应用主类中，增加@EnableDiscoveryClient注解，用来发现config-server服务，利用其来加载应用配置
+        3.5.4：沿用之前我们创建的Controller来加载Git中的配置信息
+               @RefreshScope
+               @RestController
+               public class TestController {
+                   @Value("${from}")
+                   private String from;
+                   @RequestMapping("/from")
+                   public String from() {
+                        return this.from;
+                   }
+               }
+        3.5.5：我们启动该客户端应用。若启动成功，访问http://localhost:1111/，可以在Eureka Server的信息面板中看到该应用已经被注册成功了。
+        3.5.6：访问客户端应用提供的服务：http://localhost:7002/from，此时，我们会返回在Git仓库中didispace-dev.properties文件配置的from属性内容：”git-dev-1.0”。
+4：配置刷新：
+    4.1：在config-clinet的pom.xml中新增spring-boot-starter-actuator监控模块，其中包含了/refresh刷新API。
+    4.2：重新启动config-clinet，访问一次http://localhost:7002/from，可以看到当前的配置值。
+    4.3：修改Git仓库config-repo/didispace-dev.properties文件中from的值
+    4.4：再次访问一次http://localhost:7002/from，可以看到配置值没有改变
+    4.5：通过POST请求发送到http://localhost:7002/refresh，我们可以看到返回内容如下["from"]，代表from参数的配置内容被更新了
+    4.6：再次访问一次http://localhost:7002/from，可以看到配置值已经是更新后的值了
+5：总结：
+    该功能还可以同Git仓库的Web Hook功能进行关联，当有Git提交变化时，就给对应的配置主机发送/refresh请求来实现配置信息的实时更新。但是，当我们的系统发展壮大之后
+        ，维护这样的刷新清单也将成为一个非常大的负担，而且很容易犯错，那么有什么办法可以解决这个复杂度呢？后续我们将继续介绍如何通过Spring Cloud Bus来实现以
+        消息总线的方式进行通知配置信息的变化，完成集群上的自动化更新。
+
+
+================================================================================
+5、消息总线
+================================================================================
+1、为什么使用消息总线：
+        利用spring cloud的消息总线，实现对配置信息的实时更新。以一个Spring Cloud Bus与Spring Cloud Config结合的例子来实现配置内容的实时更新。
+2：RabbitMQ实现：
+    2.1：config-repo：定义在Git仓库中的一个目录，其中存储了应用名为didispace的多环境配置文件，配置文件中有一个from参数。
+    2.2：config-server-eureka：配置了Git仓库，并注册到了Eureka的服务端。
+    2.3：config-client-eureka：通过Eureka发现Config Server的客户端，应用名为didispace，用来访问配置服务器以获取配置信息。该应用中提供了一个/from接口，它会
+        获取config-repo/didispace-dev.properties中的from属性返回。
+    2.4：扩展config-client-eureka应用
+        2.4.1：修改pom.xml增加spring-cloud-starter-bus-amqp模块（注意spring-boot-starter-actuator模块也是必须的）。
+        2.4.2：在配置文件中增加关于RabbitMQ的连接和用户信息
+           spring.rabbitmq.host=localhost
+           spring.rabbitmq.port=5672
+           spring.rabbitmq.username=springcloud
+           spring.rabbitmq.password=123456
+    2.4.3：启动config-server-eureka，再启动两个config-client-eureka（分别在不同的端口上，比如7002、7003），我们可以在config-client-eureka中的控制台中看到如下内
+        容，在启动时候，客户端程序多了一个/bus/refresh请求。
+    2.5：先访问两个config-client-eureka的/from请求，会返回当前config-repo/didispace-dev.properties中的from属性。
+    2.6：接着，我们修改config-repo/didispace-dev.properties中的from属性值，并发送POST请求到其中的一个/bus/refresh。
+    2.7：最后，我们再分别访问启动的两个config-client-eureka的/from请求，此时这两个请求都会返回最新的config-repo/didispace-dev.properties中的from属性。
+3：原理分析；
+    当我们将系统启动起来之后，“Service A”的三个实例会请求Config Server以获取配置信息，Config Server根据应用配置的规则从Git仓库中获取配置信息并返回。
+        此时，若我们需要修改“Service A”的属性。首先，通过Git管理工具去仓库中修改对应的属性值，但是这个修改并不会触发“Service A”实例的属性更新。我们向
+        “Service A”的实例3发送POST请求，访问/bus/refresh接口。此时，“Service A”的实例3就会将刷新请求发送到消息总线中，该消息事件会被“Service A”的实例1
+        和实例2从总线中获取到，并重新从Config Server中获取他们的配置信息，从而实现配置信息的动态更新。
+    而从Git仓库中配置的修改到发起/bus/refresh的POST请求这一步可以通过Git仓库的Web Hook来自动触发。由于所有连接到消息总线上的应用都会接受到更新请求，所以在
+        Web Hook中就不需要维护所有节点内容来进行更新，从而解决了通过Web Hook来逐个进行刷新的问题。
+    指定刷新范围：/bus/refresh接口还提供了destination参数，用来定位具体要刷新的应用程序。比如，我们可以请求/bus/refresh?destination=customers:9000，此时总线
+        上的各应用实例会根据destination属性的值来判断是否为自己的实例名，若符合才进行配置刷新，若不符合就忽略该消息。destination参数除了可以定位具体的实例
+        之外，还可以用来定位具体的服务。定位服务的原理是通过使用Spring的PathMatecher（路径匹配）来实现，比如：/bus/refresh?destination=customers:**，该请求
+        会触发customers服务的所有实例进行刷新。
+4：架构优化：
+    在之前的架构中，服务的配置更新需要通过向具体服务中的某个实例发送请求，再触发对整个服务集群的配置更新。这样的结果是，我们指定的应用实例就会不同于集群中的其
+        他应用实例，这样会增加集群内部的复杂度，不利于将来的运维工作，比如：我们需要对服务实例进行迁移，那么我们不得不修改Web Hook中的配置等。所以我们要尽可能
+        的让服务集群中的各个节点是对等的。因此，我们将之前的架构做了一些调整：
+        1、在Config Server中也引入Spring Cloud Bus，将配置服务端也加入到消息总线中来。
+        2、/bus/refresh请求不在发送到具体服务实例上，而是发送给Config Server，并通过destination参数来指定需要更新配置的服务或实例。通过上面的改动，我们的
+        服务实例就不需要再承担触发配置更新的职责。同时，对于Git的触发等配置都只需要针对Config Server即可，从而简化了集群上的一些维护工作。
+
+================================================================================
+                            消息总线---kafka
+================================================================================
+1:Spring Cloud Bus对Kafka的支持
+	1.1:物理上不同Topic的消息分开存储，逻辑上一个Topic的消息虽然保存于一个或多个Broker上，但用户只需指定消息的Topic即可生产或消费数据而不必关心数据存于何处
+	1.2:为了提供系统吞吐率，在物理上每个Topic会分成一个或多个Partition，每个Partition对应一个文件夹（存储对应分区的消息内容和索引文件）
+	1.3:每个Consumer属于一个特定的组（可为每个Consumer指定属于一个组，若不指定则属于默认组），组可以用来实现一条消息被组内多个成员消费等功能。
+	1.4:下载、解压、启动zk、启动kafka
+		zookeeper-server-start config/zookeeper.properties
+		kafka-server-start config/server.properties
+		如果需要设置多个ZooKeeper节点，可以为这个参数配置多个ZooKeeper地址，并用逗号分割。比如：zookeeper.connect=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002
+	1.5：创建Topic，执行命令：kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 1 --topic test，通过该命令，
+		创建一个名为“test”的Topic，该Topic包含一个分区一个Replica。在创建完成后，可以使用kafka-topics --list --zookeeper localhost:2181命令来查看当前的Topic。
+	1.6：创建消息生产者，执行命令：kafka-console-producer --broker-list localhost:9092 --topic test。启动后可以直接在控制台中输入消息来发送，控制台中的每一行数
+	        据都会被视为一条消息来发送。
+	1.7：创建消息消费者，执行命令：kafka-console-consumer --zookeeper localhost:2181 --topic test --from-beginning。在启动之后，我们马上可以在控制台中看到输出了
+		之前我们在消息生产客户端中发送的消息。我们可以再次打开之前的消息生产客户端来发送消息，并观察消费者这边对消息的输出来体验Kafka对消息的基础处理。
+	1.8：整合Spring Cloud Bus：
+		1.8.1：在pom.xml的dependenies节点中进行修改，具体如下：
+			<dependency>
+			    <groupId>org.springframework.cloud</groupId>
+			    <artifactId>spring-cloud-starter-bus-kafka</artifactId>
+			</dependency>
+		1.8.2：我们可以尝试把刚刚搭建的ZooKeeper、Kafka启动起来，并将修改为spring-cloud-starter-bus-kafka模块的config-server和config-client启动起来。
+			从控制台的输出内容，我们可以看到config-server连接到了Kafka中，并使用了名为springCloudBus的Topic。
+		1.8.3：我们可以使用kafka-topics --list --zookeeper localhost:2181命令来查看当前Kafka中的Topic
+			可以在Kafka中看到已经多了一个名为springCloudBus的Topic。
+		1.8.4：我们再启动配置了spring-cloud-starter-bus-kafka模块的config-client，可以看到控制台中输出如下内容：config-client启动时输出了类似的内容，他们都订
+			阅了名为springCloudBus的Topic。
+		1.8.5：在启动了config-server和config-client之后，我们可以在本地启动多个不同端口的config-client。此时，我们的config-server以及多个config-client都已经连
+			接到了由Kafka实现的消息总线上。我们可以先访问各个config-client上的/from请求，查看他获取到的配置内容。然后，修改Git中对应的参数内容，再访问各
+			个config-client上的/from请求，可以看到配置内容并没有改变。最后，我们向config-server发送POST请求：/bus/refresh，此时我们再去访问各个
+			config-client上的/from请求，就能获得到最新的配置信息，各客户端上的配置都已经加载为最新的Git配置内容。
+
+================================================================================
+                          周立---zuul：网关服务
+=================================================================================
+1、准备工作：下面配置是不用配置，可以访问注册中心上面所有微服务
+    1.1：为了更贴近生产，我们首先配置Host
+        127.0.0.1 gateway
+    1.2：启动服务：microservice-discovery-eureka
+    1.3：启动服务：microservice-provider-user
+    1.4：新建microservice-api-gateway项目
+        1.4.1：启动类中使用@EnableZuulProxy注解激活zuul
+    1.5：配置文件：application.yml
+        spring:
+          application:
+            name: microservice-api-gateway
+        server:
+          port: 8050
+        eureka:
+          instance:
+            hostname: gateway
+          client:
+            serviceUrl:
+              defaultZone: http://discovery:8761/eureka/
+    1.6测试：
+        http://localhost:8050/microservice-provider-user/1，这样可以访问microservice-provider-user服务中id=1的用户信息
+        结论：http://GATEWAY:GATEWAY_PORT/想要访问的Eureka服务id的小写/**，将会访问到 http://想要访问的Eureka服务id的小写:该服务端口/**
+2、自定义路径访问微服务：
+    2.1：# 下面整个树都非必须，如果不配置，将默认使用 http://GATEWAY:GATEWAY_PORT/想要访问的Eureka服务id的小写/** 路由到：
+        http://想要访问的Eureka服务id的小写:该服务端口/**
+    zuul:
+      routes:
+        user:                                               # 可以随便写，在zuul上面唯一即可；当这里的值 = service-id时，service-id可以不写。
+          path: /user/**                                    # 想要映射到的路径
+          service-id: microservice-provider-user            # Eureka中的serviceId
+    2.2：如何忽略某些服务？
+        如果我们现在只想将microservice-consumer-movie-ribbon服务暴露给外部，microservice-provider-user不想暴露，那么应该怎么办呢？配置如下：
+        zuul:
+          ignored-services: microservice-provider-user          # 需要忽视的服务(配置后将不会被路由)
+          routes:
+            movie:                                              # 可以随便写，在zuul上面唯一即可；当这里的值 = service-id时，service-id可以不写。
+              path: /movie/**                                   # 想要映射到的路径
+              service-id: microservice-consumer-movie-ribbon-with-hystrix    # Eureka中的serviceId
+    2.3：直接使用Zuul而不使用Eureka(可以但是不建议这么做，因为得手动地配置大量URL，不是很方便。)
+        zuul:
+          routes:
+            movie:                        # 可以随便写
+              path: /user/**
+              url: http://localhost:8000/   # path路由到的地址，也就是访问http://localhost:8050/user/**会路由到http://localhost:8000/**
+3、客户端一个请求中直接调用多个微服务的缺点：
+    3.1：例如，亚马逊的产品最终页要请求数百个微服务。虽然一个客户端可以通过LAN发起很多个请求，但是在公网上这样会很没有效率，这个问题在移动互联网上尤为突出
+        。这个方案同时会导致客户端代码非常复杂。
+    3.2：另一个存在的问题是客户端直接请求微服务的协议可能并不是web友好型。应用应该在防火墙外采用类似HTTP或者WEBSocket协议。
+    3.3：随着时间的推移，我们可能需要改变系统微服务目前的切分方案。例如，我们可能需要将两个服务合并或者将一个服务拆分为多个。但是，如果客户端直接与微服务
+        交互， 那么这种重构就很难实施。
+4、gateway提供粗粒度的接口他内部封装对多个微服务的调用，这种方式的优点：
+    4.1：以产品最终页这个使用场景为例。API Gateway提供一个服务接口（/productdetails?productid=xxx）使得移动客户端可以在一个请求中检索到产品最终页的全部数
+        据。API Gateway通过调用多个服务来处理这一个请求并返回结果，涉及产品信息、推荐、评论等。
+    4.2：对于有些请求，API Gateway可以通过直接路由请求到对应的后端服务上的方式来处理。对于另外一些请求，它需要调用多个后端服务并合并结果来处理。
+        API Gateway可能需要先通过授权服务来验证请求，然后在路由到后端服务。
+    4.3：部分失败的处理：例如，如果是在产品详情页的推荐服务模块无响应，那么API Gateway应该返回剩下的其他信息给用户，因为这些信息也是有用的。推荐部分可以
+        返回空，也可以返回固定的顶部10个给用户。但是，如果是产品信息服务无响应，那么API Gateway就应该给客户端返回一个错误。
+
+
+
+
+
+
+
+
+

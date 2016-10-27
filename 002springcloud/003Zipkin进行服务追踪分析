@@ -1,0 +1,49 @@
+==============================================================================================
+https://yq.aliyun.com/articles/60165#11         Zipkin对Spring Cloud应用进行服务追踪分析
+==============================================================================================
+1、zipkin的作用：
+    Zipkin可以结合压力测试工具一起使用，分析系统在大压力下的可用性和性能。
+2：服务追踪分析：
+    对于入口的一个调用可能需要有多个后台服务协同完成，链路上任何一个调用超时或出错都可能造成前端请求的失败。形成一个类似树形的调用链。针对服务化应用全链路
+        追踪的问题，Google发表了Dapper论文,基本思路是在服务调用的请求和响应中加入ID，标明上下游请求的关系。利用这些信息，可以可视化地分析服务调用链路和服务
+        间的依赖关系。
+3：zipkin：
+    对应Dpper的开源实现是Zipkin，支持多种语言，其中Java由多种不同的库来支持。Spring Cloud Sleuth是对Zipkin的一个封装，对于Span、Trace等信息的生成、接入
+        HTTP Request，以及向Zipkin Server发送采集信息等全部自动完成。
+4：演示过程：
+    4.1：本次演示的服务有两个：tracedemo做为前端服务接收用户的请求，tracebackend为后端服务，tracedemo通过http协议调用后端服务。
+    4.2：racedemo应用通过restTemplate调用后端tracedemo服务，注意，URL中指明tracedemo的地址为backend。
+        @RequestMapping("/")
+        public String callHome(){
+            LOG.log(Level.INFO, "calling trace demo backend");
+            return restTemplate.getForObject("http://backend:8090", String.class);
+        }
+    4.3：后端服务响应HTTP请求，输出一行日志后返回经典的“hello world”
+        @RequestMapping("/")
+        public String home(){
+            LOG.log(Level.INFO, "trace demo backend is being called");
+            return "Hello World.";
+        }
+    4.4：在哪里实现的，HTTP请求中注入追踪信息并把相关信息发送到Zipkin Server呢？
+        Spring应用在监测到Java依赖包中有spring-cloud-starter-sleuth和spring-cloud-sleuth-zipkin后，会自动在RestTemplate的调用过程中向HTTP请求注入追踪信息
+            ，并向Zipkin Server发送这些信息。
+    4.5：Zipkin Server的地址又是在哪里指定的呢？答案是在application.properties中：
+        spring.zipkin.base-url=http://zipkin-server:9411    注意Zipkin Server的地址为zipkin-server
+    4.6：Zipkin Server
+        4.6.1：利用Annotation声明方式创建Zipkin
+            在主程序Class增加一个注解@EnableZipkinServer
+        4.6.2：在application.properties将端口指定为9411
+            server.port=9411
+    4.7：访问前端应用3次，页面显示3次服务调用
+    4.8：注意的是，在生产环境中还需要为Zipkin配置数据库
+    4.9：本文的示例代码在此：https://github.com/binblee/zipkin-demo
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,181 @@
+======================================================================================================================
+                                1、服务注册与发现
+======================================================================================================================
+1、微服务介绍：
+    应用拆分成多个服务，服务与服务间通过诸如RESTful API的方式互相调用。
+2、演示使用过程：
+    2.1：创建注册中心
+        通过@EnableEurekaServer注解启动一个服务注册中心
+        在默认设置下，该服务注册中心也会将自己作为客户端来尝试注册它自己，所以我们需要禁用它的客户端注册行为，只需要在application.properties中问增加如下配置：
+            eureka.client.register-with-eureka=false
+            eureka.client.fetch-registry=false
+    2.2：启动工程后，访问：http://localhost:1111/
+    2.3：创建provider：
+        假设我们有一个提供计算功能的微服务模块，我们实现一个RESTful API，通过传入两个参数a和b，最后返回a + b的结果。
+        2.3.1:在主类中通过加上@EnableDiscoveryClient注解，该注解能激活Eureka中的DiscoveryClient实现。
+        2.3.2:application.properties做一些配置工作，具体如下：
+            spring.application.name=compute-service ，在注册中心中指定微服务的名称后续在调用的时候只需要使用该名称就可以进行服务的访问。
+            server.port=2222
+            eureka.client.serviceUrl.defaultZone=http://localhost:1111/eureka/ ，指定服务注册中心的位置。
+    2.4:启动该工程后，再次访问：http://localhost:1111/ ，可以看到compute-service：2222
+
+
+===============================================================================================================================
+                                              2、服务消费者
+================================================================================================================================
+1、ribbon：
+    Ribbon是一个基于HTTP和TCP客户端的负载均衡器。当Ribbon与Eureka联合使用时，它将职责委托给Eureka来确定服务端是否已经启动。使用Ribbon来调用服务，并实现客
+        户端的均衡负载。
+2、演示使用过程：
+    2.1：修改compute-service中的server-port为2223，再启动一个服务提供方：compute-service
+    2.2：使用Ribbon实现客户端负载均衡的消费者
+        2.2.1：应用主类中，通过@EnableDiscoveryClient注解来添加发现服务能力。创建RestTemplate实例，并通过@LoadBalanced注解开启均衡负载能力。
+        2.2.2：创建ConsumerController来消费COMPUTE-SERVICE的add服务。通过直接RestTemplate来调用服务，计算10 + 20的值。
+            return restTemplate.getForEntity("http://COMPUTE-SERVICE/add?a=10&b=20", String.class).getBody();
+    2.3：application.properties中配置eureka服务注册中心
+        eureka.client.serviceUrl.defaultZone=http://localhost:1111/eureka/
+    2.4：启动该应用，并访问两次：http://localhost:3333/add
+        可以看到，之前启动的两个compute-service服务端分别被调用了一次。到这里，我们已经通过Ribbon在客户端已经实现了对服务调用的均衡负载。
+3、Feign：
+    Feign是一个声明式的Web Service客户端，它使得编写Web Serivce客户端变得更加简单。
+    Spring Cloud为Feign增加了对Spring MVC注解的支持，还整合了Ribbon和Eureka来提供均衡负载的HTTP客户端实现。
+3.1：Feign如何方便的声明对上述computer-service服务的定义和调用。
+    3.1.1：创建一个Spring Boot工程，配置pom.xml，将上述的配置中的ribbon依赖替换成feign的依赖
+    3.1.2：在应用主类中通过@EnableFeignClients注解开启Feign功能
+    3.1.3：定义compute-service服务的接口
+        使用@FeignClient("compute-service")注解来绑定该接口对应compute-service服务
+    3.1.4：通过Spring MVC的注解来配置compute-service服务下的具体实现
+        在web层中调用上面定义的ComputeClient
+    3.1.5：application.properties中不用变，指定eureka服务注册中心即可
+    3.1.6：启动该应用，访问几次：http://localhost:3333/add ，对服务提供方实现了均衡负载。
+    3.1.7：这一节我们通过Feign以接口和注解配置的方式，轻松实现了对compute-service服务的绑定，这样我们就可以在本地应用中像本地服务一下的调用它，并且做到了
+        客户端均衡负载。
+
+
+====================================================================================================
+                                         3、断路器
+====================================================================================================
+ 1、为何使用断路器：
+    cousumer从注册中心获得多个provider的地址列表，在访问这些请求时候，如果失败率达到一个阈值后，就自动开启断路器模式，consumer就不会调用provider了，直接返回
+        一个指定的信息。注册中心中的一个服务可能对应多个不同地址的provider，他们都会发送心跳给注册中心，如果长时间没心跳注册中心就把这个地址的provider下线，
+        但是下线前会检查如果下线比例超过了一个阈值，那么认为是网络问题导致的，这样就开启自我保护模式，就不把这个provider对应的地址下线了。
+    在微服务架构中，存在着那么多的服务单元，若一个单元出现故障，就会因依赖关系形成故障蔓延，最终导致整个系统的瘫痪，这样的架构相较传统架构就更加的不稳定。为
+        了解决这样的问题，因此产生了断路器模式。在分布式架构中，断路器模式的作用也是类似的，当某个服务单元发生故障之后，通过断路器的故障监控，向调用方返回一
+        个错误响应，而不是长时间的等待。这样就不会使得线程因调用故障服务被长时间占用不释放，避免了故障在分布式系统中的蔓延。在Spring Cloud中使用了Hystrix 来
+        实现断路器的功能。
+    断路器有三个状态 关闭 半开 打开，正常情况下 断路器是关闭状态，当失败率达到一定的程度 断路器就打开 这个时候压根不再去请求远程了，从而防止了系统的级联错误。
+2、ribbon中使用断路器：
+    2.1：Ribbon中引入Hystrix，pom.xml中引入依赖hystrix依赖
+    2.2:主类中使用@EnableCircuitBreaker注解开启断路器功能
+    2.3:：使用ribbon消费服务的函数上增加@HystrixCommand注解来指定回调方法
+          @HystrixCommand(fallbackMethod = "addServiceFallback")
+           public String addService() {
+           return restTemplate.getForEntity("http://COMPUTE-SERVICE/add?a=10&b=20", String.class).getBody();
+          }
+3、feign中使用断路器：
+    3.1：使用@FeignClient注解中的fallback属性指定回调类
+        @FeignClient(value = "compute-service", fallback = ComputeClientHystrix.class)
+        public interface ComputeClient {
+            @RequestMapping(method = RequestMethod.GET, value = "/add")
+            Integer add(@RequestParam(value = "a") Integer a, @RequestParam(value = "b") Integer b);
+        }
+    3.2：创建回调类ComputeClientHystrix，实现@FeignClient的接口，此时实现的方法就是对应@FeignClient接口中映射的fallback函数。
+        @Component
+        public class ComputeClientHystrix implements ComputeClient {
+            @Override
+            public Integer add(@RequestParam(value = "a") Integer a, @RequestParam(value = "b") Integer b) {
+                return -9999;
+            }
+        }
+    3.3：再用之前的方法验证一下，是否在compute-service服务不可用的情况下，页面返回了-9999。
+
+
+=================================================================================
+                                                           4、配置中心
+==================================================================================
+1、演示过程：
+    1.1：在git仓库：https://github.com/eacdy/spring-cloud-study/中，新建目录config-repo，创建以下几个文件：
+          microservice-config-client-dev.properties
+          microservice-config-client.properties
+          microservice-config-client-dev.properties 文件中添加如下内容：profile=dev
+    1.2：pom中引入spring-cloud-config-server
+    1.3：使用@EnableConfigServer注解激活配置服务
+    1.4：配置文件：application.yml
+          git:
+              uri: https://github.com/eacdy/spring-cloud-study/     # 配置git仓库的地址
+              search-paths: config-repo                             # git仓库地址下的相对地址，可以配置多个，用,分割。
+              username:                                             # git仓库的账号
+              password:                                             # git仓库的密码
+    1.5：启动成功搭建Config Server，可使用以下路径来访问microservice-config-client-dev.properties：
+          http://localhost:8040/microservice-config-client-dev.properties
+          http://localhost:8040/microservice-config-client/dev
+2、一个微服务应用，如何才能获取配置信息呢？
+    2.1：微服务项目的pom中引入spring-cloud-starter-config
+    2.2：编写测试Controller，这边的@RefreshScope注解不能少，否则即使调用/refresh，配置也不会刷新
+         @Value("${profile}")
+         private String profile;这样来引用某个属性文件中的一个属性值
+    2.3：配置文件bootstrap.yml
+              spring:
+                application:
+                  name: microservice-config-client   # 文件名称
+                cloud:
+                  config:
+                    uri: http://config-server:8040/   # 配置中心地址
+                    profile: dev                      # 哪个环境的
+                    label: master                     # 哪个分支的
+    2.4启动，并访问：http://localhost:8041/hello ，我们会发现此时可以显示git仓库中配置文件的内容：dev
+    2.5配置内容的热加载：
+            2.5.1：我们将microservice-config-client-dev.properties中值改为profile=abcd并提交到git仓库。
+            2.5.2：curl  -X POST http://localhost:8041/refresh   刷新的使用端
+            2.5.3：然后再次访问http://localhost:8041/hello ，将会看到：abcd ，说明配置已经刷新
+3、配置服务与注册中心联合使用(Config Server与 Eureka 联合使用)：eureka不用改了，只是修改配置中心的服务端
+    3.1:启动服务microservice-discovery-eureka
+    3.2:准备好几个配置文件，命名规范为项目名称-环境名称.properties ，本文使用的名称是microservice-config-client-eureka-dev.properties
+    3.3:创建microservice-config-server-eureka
+    3.4：配置文件：application.yml
+              server:
+                port: 8050
+              spring:
+                application:
+                  name: microservice-config-server-eureka
+                cloud:
+                  config:
+                    server:
+               git:
+                 uri: https://github.com/eacdy/spring-cloud-study/ #属性文件，git地址
+                 search-paths: config-repo   #目录
+                 username:
+                 password:
+              eureka:
+                client:
+                  serviceUrl:
+                    defaultZone: http://discovery:8761/eureka/ #注册中心地址
+    3.5：整合eureka后的client端项目(使用配置中心的)microservice-config-client-eureka
+        3.5.1：编写测试Controller
+                这边的@RefreshScope注解不能少，否则即使调用/refresh，配置也不会刷新
+                @Value("${profile}")
+                private String profile;
+        3.5.2：配置文件：bootstrap.yml
+              spring:
+                application:
+                  name: microservice-config-client-eureka #属性文件名称
+                cloud:
+                  config:
+                    profile: dev  #环境
+                    label: master  #分支
+                    discovery:
+               enabled: true           # 默认false，设为true表示从注册中心查找配置中心地址
+               serviceId: microservice-config-server-eureka  # 指定config server在注册中心的serviceId，默认为：configserver
+              eureka:
+                client:
+                  serviceUrl:
+                    defaultZone: http://discovery:8761/eureka/
+4总结：
+    配置中心暴露出去自己的服务两种方式：1、直接暴露出去一个http的url。2、把自己这个服务注册到注册中心，使用者从注册中心根据配置服务的serviceid找到配置
+        服务。这两种方式找到配置服务后，就可以根据文件名称、哪个环境、哪个分支确定唯一的一个属性配置文件了，就可以使用里面的属性值了。不管哪种方式来使
+        用注册中心注册中心都是从git服务器上面下载文件的。
+    配置中心连接git，client只要找到配置中心即可，client可以通过url指向配置中心地址，也可以通过注册中心找到配置中心(配置中心要先注册到配置中心)。本文
+        的bootstrap.yml文件中的内容不能放到application.yml中，否则config部分无法被加载，因为config部分的配置先于application.yml被加载，而
+        bootstrap.yml中的配置会先于application.yml加载。 这种方式的特点是使用属性文件的微服务强依赖于注册中心，在启动时候从注册中心读取属性值，如果注册
+        中心不可用，这个微服务启动也会失败的。注册中心启动时候不会连接git服务器，微服务启动时候需要属性值才会调用注册中心，这时候注册中心才会连接git服务
+        器，如果不能从git服务器查到值使得微服务会启动失败。微服务在重启时候使用注册中心注入属性值，起来后就放到本地缓存了，这样注册中心在当掉也就没事了。
