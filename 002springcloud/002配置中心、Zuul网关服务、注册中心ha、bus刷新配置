@@ -121,37 +121,6 @@ https://yq.aliyun.com/articles/60530?spm=5176.100239.blogcont60165.22.BLe1ws    
         不仅仅实现了路由功能来屏蔽诸多服务细节，更实现了服务级别、负载均衡的路由。也实现了接口权限校验与微服务业务逻辑的解耦。通过服务网关中的过滤器，在各
             生命周期中去校验请求的内容，将原本在对外服务层做的校验前移，保证了微服务的无状态性，同时降低了微服务的测试难度，让服务本身更集中关注业务逻辑的
             处理。实现了断路器，不会因为具体微服务的故障而导致服务网关的阻塞，依然可以对外服务。
-================================================================================
-                        注册中心ha
-================================================================================
-1、注册中心ha：
-        进行互相注册的方式来实现高可用的部署，所以我们只需要将Eureke Server配置其他可用的serviceUrl就能实现高可用部署。
-2：构建双节点的注册中心：
-    2.1：创建application-peer1.properties，作为peer1服务中心的配置，并将serviceUrl指向peer2
-        eureka.client.serviceUrl.defaultZone=http://peer2:1112/eureka/
-    2.2：创建application-peer2.properties，作为peer2服务中心的配置，并将serviceUrl指向peer1
-        eureka.client.serviceUrl.defaultZone=http://peer1:1111/eureka/
-    2.3：在/etc/hosts文件中添加对peer1和peer2的转换
-          127.0.0.1 peer1
-          127.0.0.1 peer2
-    2.4：通过spring.profiles.active属性来分别启动peer1和peer2
-          java -jar eureka-server-1.0.0.jar --spring.profiles.active=peer1
-          java -jar eureka-server-1.0.0.jar --spring.profiles.active=peer2
-    2.5：此时访问peer1的注册中心：http://localhost:1111/，如下图所示，我们可以看到registered-replicas中已经有peer2节点的eureka-server了。
-        同样地，访问peer2的注册中心：http://localhost:1112/，能看到registered-replicas中已经有peer1节点，并且这些节点在可用分片（available-replicase）之中。
-        我们也可以尝试关闭peer1，刷新http://localhost:1112/，可以看到peer1的节点变为了不可用分片（unavailable-replicas）。
-3：把provider注册到注册中心集群中去：
-    3.1：修改application.properties配置文件：
-        eureka.client.serviceUrl.defaultZone=http://peer1:1111/eureka/,http://peer2:1112/eureka/
-    3.2：可以观察到compute-service同时被注册到了peer1和peer2上。若此时断开peer1，由于compute-service同时也向peer2注册，因此在peer2上其他服务依然能访问到
-        compute-service，从而实现了高可用的服务注册中心。
-4：深入理解注册中心的集群：
-    4.1：Eureka Server的同步遵循着一个非常简单的原则：只要有一条边将节点连接，就可以进行信息传播与同步
-    4.2：假设我们有3个注册中心，我们将peer1、peer2、peer3各自都将serviceUrl指向另外两个节点。换言之，peer1、peer2、peer3是两两互相注册的。启动三个服务注册中心，
-        并将compute-service的serviceUrl指向peer1并启动，访问http://localhost:1112/，可以看到3个注册中心组成了集群，compute-service服务通过peer1同步给了与之
-        互相注册的peer2和peer3。Eureka Server的传播与同步是具备方向性的。
-    4.3：两两注册的方式可以实现集群中节点完全对等的效果，实现最高可用性集群，任何一台注册中心故障都不会影响服务的注册与发现
-    4.4：Eureka Server具备单方面有指向的服务传播与同步机制，在一些对服务发现有限制的情况下，可以利用这样的机制进行服务注册与发现的的单向控制
 
 
 ================================================================================
