@@ -1,0 +1,36 @@
+CenOS Linux安装nginx
+http://www.cnblogs.com/skyblue/archive/2013/05/13/3075900.html
+一、安装nginx 
+    1、在nginx官方网站下载一个包，下载地址是：http://nginx.org/en/download.html 
+    2、WinSCP(ftp上传工具).exe FTP 上传工具上传达到CentOS中 
+    3、我是先建一个目录，把要用的到的安装包放到一起. 
+    #mkdir /home/ 
+    #tar zxf nginx-1.4.1.tar.gz 
+    #cd nginx-1.4.1 
+    4、安装pcre开发包 
+    #yum install -y pcre-devel 
+    5、如果安装出现在下面的错误是缺少编译环境。安装编译源码所需的工具和库 
+    ./configure: error: C compiler cc is not found 
+    #yum install gcc gcc-c++ ncurses-devel perl 
+    6、安装cmake，从http://www.cmake.org下载源码并编译安装 
+    #yum -y install make gcc gcc-c++ ncurses-devel 
+    #yum -y install zlib zlib-devel 
+    7、如果需要ssl功能需要openssl库 
+    #yum -y install openssl openssl--devel 
+    8、安装nginx 
+    #cd nginx-1.4.1 
+    #./configure --prefix=/opt/nginx 
+    #make 
+    #make install 
+    9、启动服务 
+    #/opt/nginx/sbin/nginx  -c /opt/nginx/conf/nginx.conf 
+    10、停止服务 
+     #/opt/nginx/sbin/nginx -s stop 
+    11、查看端口占用情况 
+    #netstat -tunlp 
+    12、如果其它机器无法访问，解决方法如下： 
+    #/sbin/iptables -I INPUT -p tcp --dport 80 -j ACCEPT 
+    然后保存： 
+    #/etc/rc.d/init.d/iptables save 
+    重启防火墙 
+    #/etc/init.d/iptables restart

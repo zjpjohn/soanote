@@ -175,92 +175,9 @@
     4.1：熔断器本质是方法级别的，consumer在调用某个方法时候大量出错就对这个方法进行熔断，执行一个设定的方法，ribbon是一个方法一个方法进行指定，feign是
         指定一个类来实现接口，接口中的每个方法熔断时候就执行这个类中的实现的方法。
 
-=================================================================================
-        6、配置中心
-==================================================================================
-1、演示过程：
-    1.1：在git仓库：https://github.com/eacdy/spring-cloud-study/中，新建目录config-repo，创建以下几个文件：
-          microservice-config-client-dev.properties
-          microservice-config-client.properties
-          microservice-config-client-dev.properties 文件中添加如下内容：profile=dev
-    1.2：pom中引入spring-cloud-config-server
-    1.3：使用@EnableConfigServer注解激活配置服务
-    1.4：配置文件：application.yml
-          git:
-              uri: https://github.com/eacdy/spring-cloud-study/     # 配置git仓库的地址
-              search-paths: config-repo                             # git仓库地址下的相对地址，可以配置多个，用,分割。
-              username:                                             # git仓库的账号
-              password:                                             # git仓库的密码
-    1.5：启动成功搭建Config Server，可使用以下路径来访问microservice-config-client-dev.properties：
-          http://localhost:8040/microservice-config-client-dev.properties
-          http://localhost:8040/microservice-config-client/dev
-2、一个微服务应用，如何才能获取配置信息呢？
-    2.1：微服务项目的pom中引入spring-cloud-starter-config
-    2.2：编写测试Controller，这边的@RefreshScope注解不能少，否则即使调用/refresh，配置也不会刷新
-         @Value("${profile}")
-         private String profile;这样来引用某个属性文件中的一个属性值
-    2.3：配置文件bootstrap.yml
-              spring:
-                application:
-                  name: microservice-config-client   # 文件名称
-                cloud:
-                  config:
-                    uri: http://config-server:8040/   # 配置中心地址
-                    profile: dev                      # 哪个环境的
-                    label: master                     # 哪个分支的
-    2.4启动，并访问：http://localhost:8041/hello ，我们会发现此时可以显示git仓库中配置文件的内容：dev
-    2.5配置内容的热加载：
-            2.5.1：我们将microservice-config-client-dev.properties中值改为profile=abcd并提交到git仓库。
-            2.5.2：curl  -X POST http://localhost:8041/refresh   刷新的使用端
-            2.5.3：然后再次访问http://localhost:8041/hello ，将会看到：abcd ，说明配置已经刷新
-3、配置服务与注册中心联合使用(Config Server与 Eureka 联合使用)：eureka不用改了，只是修改配置中心的服务端
-    3.1:启动服务microservice-discovery-eureka
-    3.2:准备好几个配置文件，命名规范为项目名称-环境名称.properties ，本文使用的名称是microservice-config-client-eureka-dev.properties
-    3.3:创建microservice-config-server-eureka
-    3.4：配置文件：application.yml
-              server:
-                port: 8050
-              spring:
-                application:
-                  name: microservice-config-server-eureka
-                cloud:
-                  config:
-                    server:
-               git:
-                 uri: https://github.com/eacdy/spring-cloud-study/ #属性文件，git地址
-                 search-paths: config-repo   #目录
-                 username:
-                 password:
-              eureka:
-                client:
-                  serviceUrl:
-                    defaultZone: http://discovery:8761/eureka/ #注册中心地址
-    3.5：整合eureka后的client端项目(使用配置中心的)microservice-config-client-eureka
-        3.5.1：编写测试Controller
-                这边的@RefreshScope注解不能少，否则即使调用/refresh，配置也不会刷新
-                @Value("${profile}")
-                private String profile;
-        3.5.2：配置文件：bootstrap.yml
-              spring:
-                application:
-                  name: microservice-config-client-eureka #属性文件名称
-                cloud:
-                  config:
-                    profile: dev  #环境
-                    label: master  #分支
-                    discovery:
-               enabled: true           # 默认false，设为true表示从注册中心查找配置中心地址
-               serviceId: microservice-config-server-eureka  # 指定config server在注册中心的serviceId，默认为：configserver
-              eureka:
-                client:
-                  serviceUrl:
-                    defaultZone: http://discovery:8761/eureka/
-4总结：
-    4.1：配置中心暴露出去自己的服务两种方式：1、直接暴露出去一个http的url。2、把自己这个服务注册到注册中心，使用者从注册中心根据配置服务的serviceid找
-        到配置服务。这两种方式找到配置服务后，就可以根据文件名称、哪个环境、哪个分支确定一个配置文件了，就可以使用里面的属性值了。不管哪种方式来使用注
-        册中心注册中心都是从git服务器上面下载文件的。
-    4.2：配置中心连接git，client只要找到配置中心即可，client可以通过url指向配置中心地址，也可以通过注册中心找到配置中心(配置中心要先注册到配置中心)。
-        项目的bootstrap.yml文件中的内容不能放到application.yml中，否则config部分无法被加载，因为config部分的配置先于application.yml被加载，而
-        bootstrap.yml中的配置会先于application.yml加载。 这种方式的特点是使用属性文件的微服务强依赖于注册中心，在启动时候从注册中心读取属性值，如果注册
-        中心不可用，这个微服务启动也会失败的。注册中心启动时候不会连接git服务器，微服务启动时候需要属性值才会调用注册中心，这时候注册中心才会连接git服务
-        器，如果不能从git服务器查到值使得微服务会启动失败。微服务在重启时候使用注册中心注入属性值，起来后就放到本地缓存了，这样注册中心在当掉也就没事了。
+
+
+
+
+
+

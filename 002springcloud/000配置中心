@@ -1,0 +1,47 @@
+1.为何使用配置服务器：
+    使用分布式配置来存储微服务应用多环境的配置内容，它实现了对服务端和客户端对Spring Environment和PropertySource抽象的映射，所以它除了适用于Spring构建的
+        应用程序，也可以在任何其他语言运行的应用程序中使用。配置服务器默认采用git来存储配置信息，这样就有助于对环境配置进行版本管理，并且可以通过git客户端
+        工具来方便的管理和访问配置内容。当然他也提供本地化文件系统的存储方式。
+2.使用config server的主要过程：
+    2.1：创建git工程，并在下面创建目录，用于存储配置文件
+    2.2：config server指定git工程地址和他下面用于搜索配置文件的目录，并启动config server服务(可以把自己注册到eureka上面去)
+    3.3：client通过config server来加载他使用的配置文件(名称、环境、分支唯一确定一个配置文件)，client可以通过url或者eureka注册中心找到config server两种方式建议
+        使用后者
+3.config server的ha：
+    3.1：方法1：将所有的Config Server都指向同一个Git仓库，而客户端在指定Config Server位置时，只要配置Config Server外的均衡负载即可
+    3.2：方法2：多个config server实例注册到eureka上面成为微服务：把config server看成一个微服务，只需要启动多个指向同一Git仓库位置的config-server就能实现高可
+        用了
+4. 利用spring cloud的消息总线，实现对配置信息的实时更新：
+    4.1：config server和client中都引入spring cloud的bus消息总线(可以为rabbitmq或kafka等)，config server做为生产者，client做为消费者。
+    4.2：配置项目的git仓库的web hook指向config server上面/bus/refresh的这个post请求，config server会生产通知client重新加载配置文件的消息，所有连接到消息
+        总线上的应用都会接受到更新请求。
+    4.3：指定刷新范围：/bus/refresh接口还提供了destination参数，用来定位具体要刷新的应用程序。比如，我们可以请求/bus/refresh?destination=customers:9000，
+        此时总线上的各应用实例会根据destination属性的值来判断是否为自己的实例名，若符合才进行配置刷新，若不符合就忽略该消息。destination参数除了可以定位
+        具体的实例之外，还可以用来定位具体的服务。定位服务的原理是通过使用Spring的PathMatecher（路径匹配）来实现，比如：/bus/refresh?destination=customers:**，
+        该请求会触发customers服务的所有实例进行刷新。
+5总结：
+    5.1：配置中心暴露出去自己的服务两种方式：1、直接暴露出去一个http的url。2、把自己这个服务注册到注册中心，使用者从注册中心根据配置服务的serviceid找
+        到配置服务。这两种方式找到配置服务后，就可以根据文件名称、哪个环境、哪个分支确定一个配置文件了，就可以使用里面的属性值了。不管哪种方式来使用注
+        册中心注册中心都是从git服务器上面下载文件的。
+    5.2：配置中心连接git，client只要找到配置中心即可，client可以通过url指向配置中心地址，也可以通过注册中心找到配置中心(配置中心要先注册到配置中心)。
+        项目的bootstrap.yml文件中的内容不能放到application.yml中，否则config部分无法被加载，因为config部分的配置先于application.yml被加载，而
+        bootstrap.yml中的配置会先于application.yml加载。 这种方式的特点是使用属性文件的微服务强依赖于注册中心，在启动时候从注册中心读取属性值，如果注册
+        中心不可用，这个微服务启动也会失败的。注册中心启动时候不会连接git服务器，微服务启动时候需要属性值才会调用注册中心，这时候注册中心才会连接git服务
+        器，如果不能从git服务器查到值使得微服务会启动失败。微服务在重启时候使用注册中心注入属性值，起来后就放到本地缓存了，这样注册中心在当掉也就没事了。
+    5.3：可以把一个项目的属性配置文件(properties或yml格式)放到git服务器上面，项目中从配置中心取就可以取到配置文件，这样如果eureka扩容了，修改git上面的
+        配置文件后应用就自动刷新拿到最新配置不用重启服务的，但是每个项目的配置文件都要修改。
+    5.4：方式2利用nginx反向代理多个eureka节点的(这种如果可以要修改nginx的配置增加新的节点，然后reload nginx配置)第2种方式nginx的也试了，consumer可以通过
+        nginx找到注册中心找到provider进行调用，可以看到消费者也注册上来了，比如nginx下面挂了3个Eureka注册到另外的一个了，但是我觉得不能使用nginx这种方式
+        的主要原因是：consumer直接连接多个eureka，这样会优先向自己Zone的Eureka发请求，如果自己Zone中的Eureka全挂了才会尝试向其它Zone，但是如果是直接连接
+        nginx那么真正请求到哪个eureka上面去就不具备这种策略了，而是采用了nginx配置的转发策略了。
+    5.5：注意点；一个client微服务中只能引入一个属性文件
+
+
+
+
+
+
+
+
+
+
