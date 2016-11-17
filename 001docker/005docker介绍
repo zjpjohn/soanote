@@ -1,0 +1,61 @@
+1：一个进程对应一个docker容器，分布式应用是部署到多个进程中去的，对应用是透明的感知不到的感觉就是部署到多个服务器上面去了，是轻量级的虚拟化可以最大
+    限度的利用服务器的物理资源。
+2：由于docker容器的资源占用很低，所以一个物理机上面很容易创建出多个docker容器，搭建集群环境，比如hadoop集群、spark集群等等
+3：docker是容器虚拟化，一个物理机上面可以运行多个docker容器进程，相当于运行了多个操作系统，可以把一个物理机按照分布式环境来使用，云计算也是虚拟化
+    linux的内核利用namespace进行资源的隔离，利用cgroups进行资源的分配限制
+4：用docker是做分布式的,是基于linux容器技术实现的，go语音天生就是分布式的
+5：镜像就是os+自己的应用程序，镜像是分层的，最底层的是baseimage他没有父镜像，最上层的是可以写的，下面的都是只读的，镜像是分层的联合文件系统。
+6：最佳实践是一个container只做一件事情
+7：docker是内核级别的虚拟化，container直接跟操作系统的内核进行交互几乎没有性能损耗。
+8：docker的文件系统是联合分层的文件系统，最底层是baseimage，只读部分是image，可写部分是容器。
+9：dockerhub是registry，他里面有很多repository，比如一个ubuntu对应一个repository里面好多个不同版本的ubuntu镜像文件，利用tag来表示不同的版本号
+    如果不指定默认是tag为latest的这个版本的imag
+10：docker run一个image的时候，会先从本地存储区找、再从私有的registry找，最后去dockerhub去找，在哪找到了就优先使用。
+11：云计算：kubernetes+docker
+    大数据：hadoop+spark+R是基础
+    物联网：android+html5+ARM
+
+qq交流群：426483100   NewHorizonsShanghai
+
+12：docker标注化了os和运行环境所以使得开发、测试、运维简单了，也可以看做一个版本管理工具、部署工具、运维工具。
+13：运行一个docker容器进入后，在里面安装jdk安装hadoop在安装spark，spark运行在hadoop平台上是一个不错的选择。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

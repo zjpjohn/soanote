@@ -1,0 +1,20 @@
+http://www.laozuo.org/5755.html
+https://my.oschina.net/ifraincoat/blog/499352
+启动/停止/重启 Redis
+ 启动服务：
+ 1
+ systemctl start redis.service
+ 停止服务：
+
+systemctl stop redis.service
+
+重启服务：
+
+systemctl restart redis.service
+
+检查状态：
+
+
+[root@idoseek ~]# systemctl status redis.service
+
+把配置文件监控改成 0.0.0.0

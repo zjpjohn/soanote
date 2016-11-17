@@ -1,0 +1,94 @@
+1：历史：
+    coreos是做操作系统的，早期跟docker合作，支持docker容器运行在coreos上面，后来发生了分歧，coreos就跟google合作引入了对google的kubernetes的集成。
+        目标是让全世界可以安全的运行基于容器的分布式应用。最终是google、coreos、docker达成一致共同制定容器的标准和规范。
+    docker容器的集群管理，最终google的kubernetes是事实的标准和最终胜者，可以加快app的开发和实施。
+    openstack下面容器技术和虚机技术会共存发展。
+2：kubernetes的api：
+    2.1：kubernetes中的所有资源都可以通过kubernetes的rest api来进行访问，在哪个namespace下面操作某个资源对象。
+    2.2：rest api接口都支持两个版本的实现，访问url中要指定访问那个版本的接口比如api/v1/资源url
+    2.3：kubernetes是使用go语言开发的
+3：ku8 eye开源项目：
+    3.1：一站式管理kubernetes集群的web界面管理系统
+    3.2：可以把整个kubernetes集群分成多个namespace，每个namespace限定资源来进行资源的隔离
+4：kubernetes的安装：
+    4.1：master节点上面安装etcd(keyvalue的数据库)
+    4.2：kubectrl命令行工具，管理各种资源的命令
+        kubectrl describe --help
+    4.3：kubernetes安装时候就会安装docker了也
+    4.4：编写yaml文件实现kubernetes的helloword
+5：kubernetes分布式架构思想：
+    5.1只有服务的概念，每个服务对应一个容器，每个服务分配一个ip和端口，并把ip和端口信息放到宿主机的环境变量中，这样其他容器的服务访问这个服务时候只需要
+        从环境变量中取出对应ip和端口就可以访问到这个服务了。这样没有入侵就让分布式服务达到了很好的直连效果。
+    5.2：如果一个服务后面对应多个pod实例，那么他们在宿主机环境变量中的ip和端口是虚拟ip和端口，访问虚ip和端口的请求会先访问kube-proxy，他有负载均衡功能
+        选择某个合适的pod实例的链路访问对应的pod实例，pod实例的增加和减少kube-proxy会自动感知，不用我们管理对我们是透明的。解决了负载均衡的问题。他可以
+        把请求转发到本节点的pod上，也可以转发到其他节点的pod实例上。
+    5.3：一个服务对应多少个pod运行实例只需要在配置文件中指定即可，有相关组件服务自动创建这些pod实例，不需要我们管，对我们是透明的，解决了服务的规模问题
+        我们不用关心这些pod都是运行在哪些节点上面了，他会根据算法自动的选择合适的节点来运行这些pod实例。
+    5.4：服务运维问题如何解决的：
+        1：kubernetes会自动监控，如果某个pod实例失败他会自动重新再启动一个这样的pod(可能是在本节点启动也可能在其他节点上面启动)
+        2：如果一个节点宕机了，那么他上面的所有pod都失败，kubernet监控到后会把上面所有失败的pod实例在其他节点上面进行重新启动的，自动监控和修复很快
+    5.5：采用这个架构进行程序设计时候需要注意的点：
+        1：服务应该是无状态的(原因是kubernetes会自动监控失败后进行重启修复)
+        2：服务的配置集中化，不能本地文件方式，比如每个服务的配置信息可以放到zookeeper或者Etcd上面，要求配置修改及时生效
+        3：满足这两点的程序是kubernetes的友好架构，很容易在kubernets上面进行托管和进行无缝的扩展。
+6：集群架构的例子：
+    1：比如传统一个分布式应用，3个web前端服务器后面挂了3个redis服务器(一个主两个从)，web服务器写主库，读从库进行读写分离，这样一个架构可能部署很久，但是
+        使用kubernetes只需要10几分钟搞定。
+    2：上面例子可以分成一个web service、一个写redis服务、一个读redis服务
+    3：创建master redis的pod(指定个数，使用到了镜像文件)、创建master redis的service(使用前面的pod)
+    4：创建slaver redis的pod(指定个数，使用到了镜像文件)、创建slaver redis的service(使用前面的pod)
+        在redis-slaver镜像的启动命令run.sh中指定了他是从哪个master进行同步数据的，可以从环境变量中找到master的地址
+    5：创建web server的pod(指定个数，使用到了镜像文件)、创建web server的service(使用前面的pod)
+        web程序中判断如果是写就访问master库(从环境变量中找到地址)，如果是读就访问slaver库
+7：怎样把某些特定的访问调度到特定的节点上面去运行：
+    1：利用label来解决：为某个节点打上zone=test的标签，在创建pod的文件中指定这个pod运行在zone为test的节点上面即可
+    2：比如9个节点的kubernetes集群，每3个一组分别打上dev、test、pro标签，这样pod实例可以方便的指定发布到哪些节点上面去运行了，达到发布到不同环境的目的
+8：扩容和升级：
+    1：kubectl scale --replicas=数量，扩容就是一个命令就搞定了
+    2：滚动升级：rolling-update，比如一个服务20个pod，他会停止一个pod升级成新的在下一个，一个一个的直到20个完毕，这个过程是自动的对我们是透明的。升级
+        了pod依赖的镜像文件的版本
+9：资源配额问题：
+    1：可以在创建pod的配置文件中指定这个pod使用多少的cpu、内存资源等，对cpu的使用是相当的一个比例，不是绝对的一个值，每个服务使用多少cpu，服务个数多了
+        每个使用的就少了。
+    2：私有的img仓库，本质是利用一个特殊的镜像文件生成的一个docker的container
+10:Kubernetes的分布式网络实践:
+    1:openvswitch：灵活完全是利用软件虚拟出来的网络，不受物理网络的限制，对原有数据包进行包装得到新的数据包进行传输，效率比较低。但很灵活可以做多个子网
+        实现各种复杂的路由。
+    2：路由方案：利用一个物理服务器作为路由器接入到kubernetes的网络中，连接简单，不涉及数据封包，只是数据包的转发，效率比较高。共享的实际物理网络不能跟
+        已有的物理网络地址冲突，这样灵活性比较低。配合quagga使用做到自动路由更新，建议生产使用。
+    3：Flannel：结合了路由机制跟隧道技术(虚拟2层网络，跟物理网络无关了)，设计巧妙使用很简单。
+11：Kubernetes Service的负载均衡和网络路由秘密：
+    1：服务进行了划分隔离后才方便分布式扩容部署，因为有些服务是不允许部署多份(定时服务)，有些服务的启动是有先后顺序的。
+    2：微服务一个服务一个进程
+    3：kubernetes的service是一个契约的概念：client根据lable访问某个service，会先到service代理，他会找到这个lable对应的多个pod实例，选择其中的一个来处理
+        client的请求。serviceid跟分配给他的唯一ip进行了绑定。
+    4：每个节点上面都运行一个kube-proxy的代理实例，每个代理实例可以代理所有服务的请求转发到对应的pod上面去，可以配置要求为每个client有session能力也可以
+        不要求有，如果配置有session保持能力，那么同一个client的请求都会到同一个pod实例。
+12：Kubernetes API和源码分析：
+    1：API server进程提供了kubernetes rest api，命令行操作是在默认namespace下操作的，api调用时候要指定是在哪个namespace下操作资源。
+    2：kubernets的用go语音开发的，下载源码后可以在本地编译后，有些.exe可以直接运行，有些需要依赖docker的环境。
+    3：Ku8 eye开源项目：https://github.com/bestcloud/ku8eye ，可以不同的环境对应不同的namespace，不同namespace分配不同数量的资源，进行了资源的隔离和分配
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

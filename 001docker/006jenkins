@@ -1,0 +1,64 @@
+1：jenkins：是开源的java实现的持续集成系统
+2：jenkins的安装方法：
+    1：先安装docker程序，然后利用jenkins的镜像来安装jenkins系统，一个服务器上面做为master，一个的做为slaver
+    2：或者安装docker、安装docker-compose，利用编写docker-compose的yaml文件来运行jenkins的镜像文件部署jenkins服务
+    3：jenkins容器挂载出来的data目录，要进行chmod 777 data 否则jenkins用户对这个目录没有权限，启动jenkins容器就会失败
+    4：启动成功后浏览器访问8080端口，需要输入密码登录，在指定文件中拷贝出密码登录后，进入jenkins的安装向导，我们可以选择自定义插件的方式安装
+    5：安装完后会提示我们创建一个admin的账号和密码，设计自己的密码，就不用使用之前自动生成的那个很长的密码了，设置完后进入jenkins的管理界面
+3：安装jenkins的slaver节点：
+    1：浏览器访问master节点后，利用界面实现创建jenkins的slaver节点(master只做调度用了)，思路是新增一个node节点，指定安装到哪个服务器上面，登录服务器的方式
+        ，在master节点上面ssh-keygen产生公钥文件，把里面的内容拷贝到slaver的服务器上面去，这样master节点就可以ssh免密码方式登录到slaver节点运行一个/var/
+        jenkins_home/jdk/bin/java   -jar启动jenkins的程序做为一个slaver节点了
+    2：manger jenkins--》manager nodes--》new node
+        executors的个数对应服务器上cpu的核数
+        launch method中指定使用ssh的方式launch slave agent
+        add credentials中指定使用root用户利用home目录下面.ssh目录中的内容进行远程登录slave服务器，把下面的公钥拷贝到slave服务器上去了
+    3：master节点上面再/var/jenkins目录下面执行ssh-keygen，这样这个目录下面就会多出.ssh的目录，上面选择root使用这个目录免密码登录slaver节点
+    4：cat >> ~/.ssh/authorized_keys master节点上公钥的内容
+    5：会自动登录到slave节点安装jdk，并使用安装的jdk启动slaver的jenkins程序的
+4：如果只想master进行调度，不需要他进行构建，那么设置master中executor是的个数为0，那么他就不进行构建只是调度了
+5：创建jenkins任务：
+    1：先在github中创建一个项目
+    2：在jenkins浏览器界面中create a new job--》source code manager指定源代码的地址比如github上的--》build trigger中指定github上进行push内容修改后，这边
+        开始进行构建--》build中添加要执行的shell命令(即怎样构建)--》save后--》就可以build now强制构建了--》可以查看构建过程中的日志
+6：配置github的回调：
+    1：这样github的代码push发生修改后，jenkins这边才会指定，配置通知jenkins的地址
+    2：build now是手动构建，想配置自动构建就要借助github上设置webhooks
+    3：settings--》webhooks && service--》Add service中搜索jenkins，选择(Git plugin)的--》jenkins的url中输入http://ip或域名:8080/——》选中这个service
+        test service检查配置的url是否正确
+    4：jenkins中对刚才创建的job进行重新设置：--》config--》bulid triggers勾选poll scm，之前勾选取消掉后直接保存即可
+7：jenkins服务的迁移：
+    1：jenkins容器中的数据目录都映射到我们master服务器的比如是/var/jenkins_home目录下面了，我们可以把这个目录拷贝的其他服务器，在上面启动一个jenkins的容器
+        这样之前我们在jenkins中构建的job就都还存在的
+8：总结：
+    1：在container中启动了jenkins服务，创建一个job指定一个github上面的项目，可以手动构建，也可以github代码修改后自动触发这边的构建
+
+===============================================================================================
+gitlab服务
+===============================================================================================
+1：我们可以在自己服务器上面构建gitlab服务，搭建类似github服务器的功能
+2：可以自动手动安装搭建，也可以利用docker安装，dockerhub上面搜索gitlab
+3：申请一个云主机有公网ip的、申请一个域名跟这个ip绑定：
+    1：github docker百度搜索，release中看到curl方式安装docker：deb/rpm install: curl -fsSL https://test.docker.com/ | sh
+    2：github docker compose百度搜索，release中看到安装docker compose的方法如下
+        curl -L https://github.com/docker/compose/releases/download/1.9.0/docker-compose-`uname -s`-`uname -m` > /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+    3：dockerhub上面搜索gitlab后，社区版本中可以使用docker命令安装，但是比较长，建议使用docker compose安装，他也提供了yml文件我们拷贝里面的内容即可
+        gitlab_rails['gitlab_shell_ssh_port'] = 2224    这样避免跟我们宿主机监听的ssh22端口冲突
+    4：在一个目录下面创建docker-compse.yml编辑里面的内容是从上面拷贝的，在这个目录下面执行docker-compose up -d，这样就启动了gitlab的容器
+    5：docker-compose ps 查看运行的进程
+    6：docker-compse logs -f
+
+
+
+
+
+
+
+
+
+
+
+
+
+

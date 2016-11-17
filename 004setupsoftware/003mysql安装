@@ -1,0 +1,31 @@
+http://www.mamicode.com/info-detail-503994.html
+
+1. 下载mysql的repo源
+    wget http://repo.mysql.com/mysql-community-release-el7-5.noarch.rpm
+2. 安装mysql-community-release-el7-5.noarch.rpm包
+    rpm -ivh mysql-community-release-el7-5.noarch.rpm
+3：安装mysql
+    yum install mysql-server
+4：重置密码
+    mysql -u root
+    mysql > use mysql;
+    mysql > update user set password=password('123456') where user= 'root';
+    mysql > exit;
+5：开放3306端口：
+    $ sudo vim /etc/sysconfig/iptables
+    添加以下内容：
+    -A INPUT -p tcp -m state --state NEW -m tcp --dport 3306 -j ACCEPT
+    保存后重启防火墙：
+    $ sudo service iptables restart
+    这样从其它客户机也可以连接上mysql服务了。
+
+
+    mysql -u root -p
+    mysql>use mysql;
+    mysql>update user set host =’%' where User =’root’;
+    mysql>flush privileges;
+
+
+http://www.111cn.net/database/mysql/45230.htm
+
+CREATE DATABASE test DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci;

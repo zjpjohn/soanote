@@ -1,0 +1,24 @@
+1:SpringCloudSleuth 微服务架构下的分布式追踪:
+    1:超时时间设置不合理，线程池配置过小、编码问题引起的频繁GC等这些都可以导致系统变慢
+    2：单体应用架构下一切都在同一个JVM进程中运行，可以利用一些工具或简单粗暴的搞一些日志输出，计算这个流程下每个关键环节的耗时，从而定位问题
+    3：如果放在分布式架构下，上诉定位问题的方式就行不通了，Spring Cloud Sleuth为Spring Cloud提供了分布式追踪方案
+2：微服务集成Sleuth：
+    #zipkin地址，Sleuth会将trace数据以http的方式发送，采样率percentage=1意味着100%发送
+    #sleuth也会产生性能消耗，因此percentage=1只是为了方便调试用例，生产环境下根据需要配置
+    spring.zipkin.base-url=http://localhost:9411
+    spring.sleuth.sampler.percentage=1
+3：Sleuth 集成 Spring Cloud Stream：
+    1：上述配置微服务是通过http来传递trace数据的(Trace数据是存放在内存的，当重启zipkin历史数据会丢失)，如果zipkin服务坏掉期间的所有请求数据都会丢失，所以
+        通过Stream将数据缓冲在消息队列会是一种更优雅方案，也回避了tomcat要面临大量http请求负载方案设计的问题，还能拥有更高的通信效率。
+4:ZipkinServer 集成 Spring Cloud Stream 和 mysql:
+    1:微服务将trace信息写入消息中间件，Zipkin需要从中间件中读取，所以zipkinServer也需要做一些适配工作
+    2:Brixton 版本的cloud在Sleuth上有个jar包版本的的问题，会导致带mysql版本的zipkin报错，参见stackoverflow，feign的作者给出了解决方案，升级一个jar包版本即可
+        。最新的cloud版本Camden中修复了这个问题。
+5:当启动所有的服务之后调用 gateway 接口 curl http://localhost:8080/do/aabbc 便可在ZipkinServer中查看追踪结果，如下图所示，你可以看到整个调用链中的时间分配，
+    可以很容易的找到性能瓶颈点。
+
+
+---------------------------------------------------------------------------------------------------------------------------------
+    spring boot admin不错了，监控整体。
+    hystrix-dashboard 监控服务接口。
+    sleuth+zipkin 监控微服务链路。

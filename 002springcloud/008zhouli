@@ -1,0 +1,107 @@
+1：单体项目：
+    单体架构的项目，项目暴露出去的ip和端口通常是固定的
+2：soa架构：
+    先有soa架构的概念，后来有微服务的概念，微服务是不绑定具体技术的可以用任何技术实现，项目暴露出去的ip和端口通常是动态变化的
+3：微服务设计原则：
+    单一职责
+    服务自制：启动不需要依赖其他服务
+    轻量级通信：服务之间通信时候尽可以轻
+    接口明确：充分发挥接口隔离变化的作用，微服务之间通信依赖于接口，一个微服务内部变化对他依赖的微服务没有影响
+4：spring cloud：
+    spring cloud是微服务开发框架之一，他是一个工具集，他里面的组件都是基于springboot开发的
+5：gradle：
+    也是一个项目的构建工具，android上面使用的多，在maven项目pom文件所在目录执行gradle init --type pom 把一个maven项目转换成gradle项目
+6：provider--consumer：
+    我们通常使用springboot开发实现provider
+    consumer也可以利用springboot，里面使用restTemplate访问provider暴露出来的ip和端口(但是分布式微服务中provider的ip和端口是动态变化的，就不能直接写死访问了)
+    在provider的pom中加入spring-boot-starter-acurator，这样就可以暴露出多个比如/env、/health的接口检查
+7：服务发现：
+    1：provider的多个实例都注册到服务发现上面，consumer从服务发现查询到provider的多个实例的地址列表，每个实例都会给服务发现发送心跳信号表明自己是活着的，如
+        果服务发现在一段时间内没有收到某个实例的心跳信号，就认为这个实例当掉了，把他从自己的实例列表中删除。
+    2：客户端发现：eureka(生产使用后开源的并且spring cloud对他支持的最完善)、zookeeper
+    3：服务器端发现：consul+nginx
+    4：aws region(区域) zone(可用区域)
+    5：微服务实例给eureka发送心跳周期默认为30秒，90秒eureka没收到某个实例的心跳信号就把这个实例从eureka的注册列表删除
+    6：provider和consumer的本地都有从eureka获得的实例列表地址的缓存信息，即使所有eureka服务不可用了，provider还是可以调用consumer的
+    7：通常provider、consumer、eureka中都有eureka的client跟eureka的sever进行交互
+    8：在父pom的spring-cloud-dependencies中指定一个版本，在具体微服务pom中spring cloud组件就不用指定具体版本，可以使用默认的了
+    9：eureka上面的红色提示：比如单机环境下心跳信息很容易达到阈值后就出现警告信息了
+    10：eureka启动后，provider注册上去，provider停止后eureka上面看到的实例是down状态的？
+    11：eureka服务器在pom、application.yml中配置需要user@password认证，这样启动后，provider在想注册到这个eureka上面去也要在application.yml中连接eureka的
+        url上面指定userpassword才可以成功注册上去，否则会报错的？
+        eureka的pom中添加spring-boot-starter-security依赖
+        eureka和provider的yml中都添加http://user:password@localhost:8761/eureka
+        我们通过浏览器查看eureka上注册实例的信息要先登录后才可以查看到了
+8：ribbon：
+    1：client的负载均衡方式调用服务的某个实例
+    2：restTemplate通过http://服务serviceid/***来访问微服务，请求会经过负载均衡后落到某个具体实例上，默认是轮训
+9：自定义ribbon的配置：
+    1：@RibbonClient(name = "microservice-provider-product",configuration = RibbonRetryConfig.class )，但是不要在扫描Main对应的包下面，否则会对所有微服务
+        实例生效，放在不同包下面就只会影响某个服务的负载均衡策略
+    2：如果放在跟main同包路径下面，需要使用注解让扫描包时候把这个排除掉，这样这个就只对他定义的服务的负载均衡策略生效不会影响其他的
+    3：Customizing the Ribbon Client using properties：这种最简单了，只会影响某个微服务的不会对其他的负载均衡策略有影响
+    users:
+      ribbon:
+        NFLoadBalancerRuleClassName: com.netflix.loadbalancer.WeightedResponseTimeRule
+10：ribbon跟eureka的关系：
+    1：EurekaClientConfigBean中看到private String region = "us-east-1";默认的region
+    2：How to Use Ribbon Without Eureka：
+        某个微服务中指定了eureka的地址，但是可以通过listOfServers让ribbon只使用某个实例，而不是eureka上面多个实例进行轮询选择使用了
+11：feign：声明试的httpclient
+    1：spring cloud中的feign使用的是springmvc的注解契约，我们可以通过自己手动配置方式修改spring cloud中feign的默认配置
+        @FeignClient(name = "stores", configuration = FooConfiguration.class)
+        public interface StoreClient {
+        }
+
+        @Configuration
+        public class FooConfiguration {
+            @Bean
+            public Contract feignContract() {
+                return new feign.Contract.Default();
+            }
+            @Bean
+            public BasicAuthRequestInterceptor basicAuthRequestInterceptor() {
+                return new BasicAuthRequestInterceptor("user", "password");
+            }
+        }
+    2：可以单独设置某个feign的client的日志输出级别
+        logging.level.project.user.UserClient: DEBUG
+    3：微服务再利用feign获得服务实例的ip和端口进行通信时候，里面使用了hystrix，默认超时时间是1秒，如果超时会抛出timeoutexception，解决办法
+        hystrix.command.default.execution.isolation.thread.timeoutInMilliseconds:5000
+        hystrix.command.default.execution.timeout.enabled
+        https://github.com/Netflix/Hystrix/wiki/Configuration
+12：eureka的高级部分：
+    1：eureka.instance.metadataMap.zone:ABC
+    2:client本地实例列表信息是有缓存的，要跟eureka的同步一致成功后才可以成功注册到eureka上面的，client会每隔30秒发送一次续约心跳给eureka证明自己还活着
+    3：spring cloud中可以看到所有配置项的属性
+13：hystrix：
+    1：hystrix默认超时时间是1秒
+    2：http://cloud.spring.io/spring-cloud-static/Brixton_SR6
+    3：http://cloud.spring.io/spring-cloud-static/Brixton.SR5/#_appendix_compendium_of_configuration_properties
+    4：feign默认是集成了hystrix对他的支持，为feignclient指定fallback的类，这样这个feignclient调用的微服务方法就具备hystrix断路器的功能了，也可以单独为
+        某个feignclient去掉hystrix对他的支持，这样这个feignclient调用微服务时候就不会触发断路器功能了，去掉的办法是把默认的hystrixfeign.bulider()修改
+        为feign.builder()，这个feignclient的配置指定注入feign.builder()，这样这个feignclient就没有hystrix的支持了。对某个feignclient去掉hystrix的支持
+    5：对所有的feignclient去掉hystrix的支持：feign.hystrix.enabled=false
+    6：@Feignclient中指定fallback属性指定断路器发生时候执行的类，fallbackFactory是fallback的增强版，除了可以返还一个默认对象，还可以获得导致打开断路器的
+        异常，但是这两个属性不能同时使用
+14：hystrix dashboard：
+    1：hystrix.stream：访问了由hystrixcommand修饰的方法后，访问这个url就会不断的输入内容但是看起来很不方便，利用dashboard就可以可视化查看了
+    2：一个微服务中使用了hystrix了，把这个微服务的url/hystrix.stream交给hystrix dashboard就可以可视化查看那个微服务中接口的调用情况了，但是如果是ribbon
+        集成hystrix简单点，如果是feign集成hystrix需要多引入依赖和添加注解，否则在访问url/hystrix.stream时候看不到转转就不行了
+    3：hystrix dashboard也是一个微服务，pom中引入依赖，添加注解启动后访问他的url/hystrix后输入某个微服务的url/hystrix.stream就可以查看对应接口的调用了
+15：turbine：
+    1：turbine也是一个微服务，启动项中指定eureka地址，收集里面的某个微服务serviceid，这样把/turbine.stream交给dashboard就可以监控一个微服务对应的多个
+        实例节点了，如果不使用turbine那就只是监控单个实例节点的了
+    2：可以给turbine指定多个微服务，那么就可以监控多个微服务了(每个微服务的多个实例)
+
+
+
+
+
+
+
+
+
+
+
+

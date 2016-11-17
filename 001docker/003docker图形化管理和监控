@@ -1,0 +1,13 @@
+1：官方3剑客：
+    1.1：dockermachine：把安装virtuualbox虚机并在上面安装docker程序，配置好网络登录信息等，这些命令做了一个一键式的安装，让搭建docker环境简单化。目的
+        是为了方便在公有云比如亚马逊、阿里云上面搭建docker环境。
+    1.2：docker compose：定义构建镜像文件，一个文件中利用多个镜像文件生成多个docker container，但是这个文件很难写，并且还是只能在单个docker主机上面运行的。
+    1.3：swarm：一个节点安装好swarm后，docker的client就可以访问swarm通过他来管理后面的多个docker节点了(docker主机的集群)，跟操作单个docker主机的命令
+        相同，swarm相当于docker主机集群的master节点，控制集群的管理和调度。
+2：开源管理工具shipyard：
+    2.1：shipyard安装是运行一个特殊的docker container
+    2.2：利用他的web界面在某个主机上面安装docker服务时候，指定label的值，可以用于过滤区分docker主机的，后面可以指定在哪些label的docker主机上面运行某个docker
+        container。
+3：cAdvisor：
+    3.1：可以实时监控某个docker主机上面的容器情况，1秒钟刷新一次，用于分析排查某个docker主机上面的问题。
+    3.2：每个container默认最多可以使用10个g的磁盘空间，他可以方便的看到每个container已经使用的磁盘空间。

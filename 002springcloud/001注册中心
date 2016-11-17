@@ -1,0 +1,107 @@
+======================================================================================================================
+        1、注册中心eureka
+======================================================================================================================
+1：总结：
+    1.1：注册中心中的一个服务可能对应多个不同地址的provider，他们都会发送心跳给注册中心，如果长时间没心跳注册中心就把这个地址的provider下线，但是下线前
+        会检查如果下线比例超过了一个阈值，那么认为是网络问题导致的，这样就开启自我保护模式，就不把这个provider对应的地址下线了。
+    1.2：默认情况下在丢失85%的节点之后会开启保护模式, 在测试的时候, 由于服务数量比较少, 当有一两个服务下线就会触发阈值, 导致接下来的服务都会被保护, 不会
+        下线,测试的时候可以调小这个阈值：
+        #自我保护模式默认开启
+        #eureka.server.enableSelfPreservation=false
+        #阈值设置为20%
+        eureka.server.renewalPercentThreshold=0.2
+=======================================================================================================
+        2、 注册中心eureka--ha
+=======================================================================================================
+2：深入理解注册中心的集群：
+    2.1：假设我们有3个注册中心，我们将peer1、peer2、peer3各自都将serviceUrl指向另外两个节点。换言之，peer1、peer2、peer3是两两互相注册的。启动三个服务注册
+        中心，并将compute-service的serviceUrl指向peer1并启动，访问http://localhost:1112/，可以看到3个注册中心组成了集群，compute-service服务通过peer1同步
+        给了与之互相注册的peer2和peer3。Eureka Server的传播与同步是具备方向性的。
+    2.2：两两注册的方式可以实现集群中节点完全对等的效果，实现最高可用性集群，任何一台注册中心故障都不会影响服务的注册与发现
+    2.3：Eureka Server具备单方面有指向的服务传播与同步机制，在一些对服务发现有限制的情况下，可以利用这样的机制进行服务注册与发现的的单向控制
+    2.4：provider中的eureka.client.serviceUrl.defaultZone=其中任何一个即可，比如为http://discovery:8761/eureka/，这样注册到1后，1会自动同步到其余两个节点
+        即provider配置中只需要配置注册中心集群中的一个节点即可。这样即使1挂了，2,3上面开启自我保护还会有provider的，其他consumer还可以访问provider。
+3：eureka注册中心集群划分粒度的理解：
+    3.1：eureka可以看做是服务的代理，通过eureka来找到服务，所以eureka只需要管理相关的服务即可，比如按照大的业务线来划分每个业务线使用一个eureka集群，这样
+        就是浪费一些服务器资源，但是这样每个eureka集群管理的服务进行了分类汇总，管理的数量就比较少(不是一个整个公司一个)，这样的规划2个或节点的eureka集群
+        就是高可用的，并且通常是不用增加节点的，即使如果需要增加节点扩容了，provider的配置不用变，只需要修改consumer的配置即可。
+4：Zone
+    4.1：Eureka支持Region和Zone的概念。其中一个Region可以包含多个Zone。Eureka在启动时需要指定一个Zone名，即当前Eureka属于哪个zone, 如果不指定则属于
+        defaultZone。Eureka Client也需要指定Zone, Client(当与Ribbon配置使用时)在向Server获取注册列表时会优先向自己Zone的Eureka发请求，如果自己Zone中的
+        Eureka全挂了才会尝试向其它Zone。当获取到远程服务列表后，Client也会优先向同一个Zone的服务发起远程调用。Region和Zone可以对应于现实中的大区和机房，
+        如在华北地区有10个机房，在华南地区有20个机房，那么分别为Eureka指定合理的Region和Zone能有效避免跨机房调用，同时一个地区的Eureka坏掉不会导致整个
+        该地区的服务都不可用。
+5：dubbo和spring cloud选择考虑点：
+  1. dubbo本身已经停止开发了，dubbox只是当当的第三方维护
+  2. dubbo只是实现了服务的治理，你还得另外搞配置中心、api gateway等等
+  3. 两者的社区活跃度无法相提并论
+  4. 严格来说，dubbo只应该跟eureka对比。
+
+
+6：provider使用eureka集群的方式：
+        6.1：方式1：provider同时向多个eureka节点进行注册：
+            eureka.client.serviceUrl.defaultZone=http://peer1:1111/eureka/,http://peer2:1112/eureka/
+        6.2：方式2：provider只向集群中的一个eureka进行注册：
+            因为注册中心集群节点之间是互相指向的，provider直接注册到的eureka，他会把注册到他上面的服务同步到其余的eureka节点上面。
+        6.3：provider向多个eureka节点同时注册这种方式好，还是provider只向一个eureka1节点注册，通过eureka1同步到eureka2和eureka3这种方式好？？？
+        6.4：前者provider给多个eureka节点发心跳，provider压力大点，后者是利用eureka server的 replication，eureka的压力大点
+        6.5：如果eureka1挂了，而服务也挂了，那其余eureka节点还是有服务信息的，不需要重新注册的(因为开启了自我保护)
+        6.6：所以我建议使用方式1，这样我们provider的配置简单，如果有新节点加入eureka集群时候，这些provider都不用重启，也不需要动态加载配置文件
+
+
+
+
+
+
+Eureka
+Eureka Environment的配置：
+eureka.environment: 字符串
+参考文档：
+https://github.com/Netflix/eureka/wiki/Configuring-Eureka
+
+Eureka DataCenter的配置
+eureka.datacenter: cloud
+https://github.com/Netflix/eureka/wiki/Configuring-Eureka
+这边说：配置-Deureka.datacenter=cloud，这样eureka将会知道是在AWS云上
+
+Eureka注册服务慢的问题如何解决？
+eureka.instance.leaseRenewalIntervalInSeconds
+参考文档：
+http://cloud.spring.io/spring-cloud-static/Camden.SR1/#_why_is_it_so_slow_to_register_a_service
+原文：
+Why is it so Slow to Register a Service?
+Being an instance also involves a periodic heartbeat to the registry (via the client’s serviceUrl) with default duration 30 seconds. A service is not available for discovery by clients until the instance, the server and the client all have the same metadata in their local cache (so it could take 3 heartbeats). You can change the period using eureka.instance.leaseRenewalIntervalInSeconds and this will speed up the process of getting clients connected to other services. In production it’s probably better to stick with the default because there are some computations internally in the server that make assumptions about the lease renewal period.
+翻译：
+作为实例还涉及到与注册中心的周期性心跳，默认持续时间为30秒（通过serviceUrl）。在实例、服务器、客户端都在本地缓存中具有相同的元数据之前，服务不可用于客户端发现（所以可能需要3次心跳）。你可以使用eureka.instance.leaseRenewalIntervalInSeconds 配置，这将加快客户端连接到其他服务的过程。在生产中，最好坚持使用默认值，因为在服务器内部有一些计算，他们对续约做出假设。
+
+如何解决Eureka Server不踢出已关停的节点的问题？
+server端:
+eureka.server.enable-self-preservation			（设为false，关闭自我保护主要）
+eureka.server.eviction-interval-timer-in-ms     清理间隔（单位毫秒，默认是60*1000）
+client端：
+eureka.client.healthcheck.enabled = true				开启健康检查（需要spring-boot-starter-actuator依赖）
+eureka.instance.lease-renewal-interval-in-seconds =10	租期更新时间间隔（默认30秒）
+eureka.instance.lease-expiration-duration-in-seconds =30 租期到期时间（默认90秒）
+
+注意：
+更改Eureka更新频率将打破服务器的自我保护功能
+https://github.com/spring-cloud/spring-cloud-netflix/issues/373
+
+
+Eureka配置instanceId显示IP
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    preferIpAddress: true
+    instance-id: ${spring.cloud.client.ipAddress}:${server.port}
+
+Eureka配置最佳实践总结
+https://github.com/spring-cloud/spring-cloud-netflix/issues/203
+
+
+
+
+
+

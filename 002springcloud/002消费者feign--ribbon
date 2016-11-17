@@ -1,0 +1,302 @@
+===============================================================================================================================
+        1、consumer：---ribbon---feign
+================================================================================================================================
+1、ribbon：
+    1.1：Ribbon是一个客户端负载均衡器，consumer利用ribbon会确定跟哪个provider进行通信。Ribbon工作时分为两步：第一步先选择 Eureka Server, 它优先选择在同
+        一个Zone且负载较少的Server；第二步是从Server取到的服务注册列表中(再根据用户指定的策略在)选择一个服务的地址。其中Ribbon提供了三种策略：轮询、断路器
+        和根据响应时间加权，默认是轮询。
+    1.2：当Ribbon与Eureka联合使用时，ribbonServerList会被DiscoveryEnabledNIWSServerList重写，扩展成从Eureka注册中心中获取服务端列表。同时它也会用
+        NIWSDiscoveryPing来取代IPing，它将职责委托给Eureka来确定服务端是否已经启动。
+2、使用Ribbon实现客户端负载均衡的消费者：
+    2.1：pom中引入spring-cloud-starter-ribbon
+    2.2：应用主类中，通过@EnableDiscoveryClient注解来添加发现服务能力。创建RestTemplate实例，并通过@LoadBalanced注解开启均衡负载能力。
+    2.3：@RestController中通过@Autowired引入RestTemplate实例来使用
+        比如ConsumerController来消费COMPUTE-SERVICE的add服务。直接通过RestTemplate来调用服务，计算10 + 20的值。
+        return restTemplate.getForEntity("http://COMPUTE-SERVICE/add?a=10&b=20", String.class).getBody();//其中的url是：http://服务提供者的serviceId/url
+    2.3：application.properties中配置eureka服务注册中心
+        eureka.client.serviceUrl.defaultZone=http://localhost:1111/eureka/
+
+3、Feign：
+    Feign是一个声明式的web service客户端，它使得编写web service客户端更为容易。创建接口，为接口添加注解，即可使用Feign。Feign可以使用Feign注解或者JAX-RS
+        注解，还支持热插拔的编码器和解码器。Spring Cloud为Feign添加了Spring MVC的注解支持，并整合了Ribbon和Eureka来为使用Feign时提供负载均衡的HTTP客户端
+        实现。
+3.1：使用feign实现客户端负载均衡的消费者：
+    3.1.1：pom中引入spring-cloud-starter-feign
+    3.1.2：在应用主类中通过@EnableFeignClients注解开启Feign功能
+    3.1.3：定义compute-service服务的接口
+        接口上面使用@FeignClient("compute-service")注解来绑定该接口对应compute-service服务
+        接口方法上面的@RequestMapping("/{id}")，对应服务方法上面的@GetMapping("/{id}")，两边的名称可以随便，方法签名相同即可
+    3.1.4：@RestController中通过@Autowired引入上面定义的接口实例来使用
+        调用接口的方法即调用了服务器的方法
+    3.1.5：application.properties中不用变，指定eureka服务注册中心即可
+4总结：
+    4.1：ribbon和feign方式，都可以从eureka找到某个服务，可能对应多个provider地址列表进行软负载选择一个进行访问
+    4.2：Spring Cloud中feign默认是集成robbin的，consumer在做选择provider的软负载时候，是使用feign好啊还是直接使用ribbon好？
+        Spring Cloud为Feign整合了Ribbon来为使用Feign时提供负载均衡的HTTP客户端实现真正实现负载均衡的是ribbon
+        在实际使用中可以选择使用feign(他也要借助ribbon实现负载均衡)或者单独使用ribbon
+        ribbon是通过restTemplate调用
+        feigin是通过定义一个接口，接口中的方法参数跟服务中方法的参数相同就可以，这个接口利用@FeignClient即获得了直接访问服务的能力。
+    4.3：如何设置robbin的策略？
+        Spring Cloud在整合Ribbon的时候，通过查看RibbonClientConfiguration源码可知默认采用了ZoneAwareLoadBalancer来实现负载均衡器，在它的chooseServer
+            中将使用IRule接口的choose函数来选择具体的服务实例。在这里IRule接口的实现会使用ZoneAvoidanceRule来挑选出具体的服务实例
+    4.4：ribbon是否有异常重试机制？比如请求一个服务时，有两个地址，请求一个失败了，然后再重试第二个。如果有的话，如何配置？比如配置是否需要重试，重试
+        几次，什么异常重试，什么异常不能重试等待。
+
+
+===============================================================================================================================
+        2、ribbon源码分析---负载均衡原理
+================================================================================================================================
+1：分析过程：
+    1.1：LoadBalancerClient接口
+        choose方法：根据服务id按照负载均衡策略选择某个地址的服务对象
+        execute方法：利用选出的服务实例执行请求
+        reconstructURI方法：把服务的url转换成host:port形式的url
+    1.2：RibbonLoadBalancerClient类是对LoadBalancerClient接口的实现
+    1.3：LoadBalancerAutoConfiguration类：实现客户端负载均衡器的自动化配置类:
+        1.3.1：ribbon实现的负载均衡自动化配置要满足下面条件
+            @ConditionalOnClass(RestTemplate.class)：RestTemplate类必须存在于当前工程的环境中
+            @ConditionalOnBean(LoadBalancerClient.class)：当前环境中必须有LoadBalancerClient的实现Bean
+        1.3.2：该自动化配置类主要做了下面三件事：
+            创建了一个LoadBalancerInterceptor的Bean，用于实现对客户端发起请求时进行拦截，以实现客户端负载均衡
+            创建了一个RestTemplateCustomizer的Bean，用于给RestTemplate增加LoadBalancerInterceptor拦截器
+            维护了一个被@LoadBalanced注解修饰的RestTemplate对象列表，并在这里进行初始化，通过调用RestTemplateCustomizer的实例来给需要客户端负载均衡
+                的RestTemplate增加LoadBalancerInterceptor拦截器
+    1.4：LoadBalancerInterceptor拦截器是如何将一个普通的RestTemplate变成客户端负载均衡的？
+        在拦截器中注入了LoadBalancerClient的实现。当一个被@LoadBalanced注解修饰的RestTemplate对象向外发起HTTP请求时，会被LoadBalancerInterceptor类的
+            intercept函数所拦截。由于我们在使用RestTemplate时候采用了服务名作为host，所以直接从HttpRequest的URI对象中通过getHost()就可以拿到服务名，
+            然后调用execute函数去根据服务名来选择实例并发起实际的请求。
+    1.5：RibbonLoadBalancerClient类是对LoadBalancerClient接口的实现
+        1.5.1：在execute函数的实现中，第一步做的就是通过getServer根据传入的服务名serviceId去获得具体的服务实例
+        1.5.2：获取具体服务实例的时候并没有使用LoadBalancerClient接口中的choose函数，而是使用了ILoadBalancer接口中定义的chooseServer函数
+        1.5.3：ILoadBalancer接口：
+            addServers：向负载均衡器中维护的实例列表增加服务实例
+            chooseServer：通过某种策略，从负载均衡器中挑选出一个具体的服务实例
+            markServerDown：用来通知和标识负载均衡器中某个具体实例已经停止服务，不然负载均衡器在下一次获取服务实例清单前都会认为服务实例均是正常服务的
+            getReachableServers：获取当前正常服务的实例列表
+            getAllServers：获取所有已知的服务实例列表，包括正常服务和停止服务的实例。
+
+            BaseLoadBalancer类实现了基础的负载均衡，而DynamicServerListLoadBalancer和ZoneAwareLoadBalancer在负载均衡的策略上做了一些功能的扩展。
+        1.5.4：把实例对象Server包装成RibbonServer对象（该对象除了存储了服务实例的信息之外，还增加了服务名serviceId、是否需要使用HTTPS等其他信息），然后
+            使用该对象再回调LoadBalancerInterceptor请求拦截器中LoadBalancerRequest的apply(final ServiceInstance instance)函数，向一个实际的具体服务实例
+            发起请求，从而实现一开始以服务名为host的URI请求，到实际访问host:post形式的具体地址的转换。
+
+            ServiceInstance该接口中暴露了服务治理系统中每个服务实例需要提供的一些基本信息，比如：serviceId、host、port等
+        1.5.5：apply(final ServiceInstance instance)函数，在接收到了具体ServiceInstance实例后，是如何通过LoadBalancerClient接口中的reconstructURI操作来
+            组织具体请求地址的呢？
+            会通过调用LoadBalancerClient接口的reconstructURI函数来重新构建一个URI来进行访问。
+            会使用RibbonLoadBalancerClient中实现的reconstructURI来组织具体请求的服务实例地址。
+            从reconstructURI函数中，我们可以看到，它通过ServiceInstance实例对象的serviceId，从SpringClientFactory类的clientFactory对象中获取对应serviceId
+                的负载均衡器的上下文RibbonLoadBalancerContext对象。然后根据ServiceInstance中的信息来构建具体服务实例信息的Server对象，并使用
+                RibbonLoadBalancerContext对象的reconstructURIWithServer函数来构建服务实例的URI。
+        1.5.6：
+            SpringClientFactory类是一个用来创建客户端负载均衡器的工厂类，该工厂会为每一个不同名的ribbon客户端生成不同的Spring上下文。
+            RibbonLoadBalancerContext类是LoadBalancerContext的子类，该类用于存储一些被负载均衡器使用的上下文内容和Api操作
+        1.5.7：
+            它从Server对象中获取host和port信息，然后根据以服务名为host的URI对象original中获取其他请求信息，将两者内容进行拼接整合，形成最终要访问的服务
+                实例的具体地址。
+    1.6：整合Ribbon的时候Spring Cloud默认采用了哪个具体实现呢？
+        查看RibbonClientConfiguration可知，默认采用了ZoneAwareLoadBalancer来实现负载均衡器。
+            @Bean
+            @ConditionalOnMissingBean
+                创建的是ZoneAwareLoadBalancer
+2：Ribbon实现客户端负载均衡的基本脉络总结：
+    通过LoadBalancerInterceptor拦截器对RestTemplate的请求进行拦截，并利用Spring Cloud的负载均衡器LoadBalancerClient将以逻辑服务名为host的URI转换成具体的
+        服务实例的过程。同时通过分析LoadBalancerClient的Ribbon实现RibbonLoadBalancerClient，可以知道在使用Ribbon实现负载均衡器的时候，实际使用的还是
+        Ribbon中定义的ILoadBalancer接口的实现，自动化配置默认采用ZoneAwareLoadBalancer的实例来进行客户端负载均衡实现
+3：负载均衡器：
+    3.1：ILoadBalancer接口的实现类逐个看看它都是如何实现客户端负载均衡的。
+    3.2：AbstractLoadBalancer是ILoadBalancer接口的抽象实现：
+        3.2.1：LoadBalancerStats对象被用来存储负载均衡器中各个服务实例的属性和统计信息，:我们可以利用这些信息来观察负载均衡器的运行情况，同时这些信息也是
+            用来制定负载均衡策略的重要依据
+    3.3：BaseLoadBalancer：
+        3.3.1：是Ribbon负载均衡器的基础实现类，在该类中定义很多关于均衡负载器相关的基础内容
+        3.3.2：定义并维护了两个存储服务实例Server对象的列表。一个用于存储所有服务实例的清单，一个用于存储正常服务的实例清单
+        3.3.3：定义了检查服务实例是否正常服务的IPing对象
+        3.3.4：定义了检查服务实例操作的执行策略对象IPingStrategy
+            1：SerialPingStrategy实现。根据源码，我们可以看到该策略采用线性遍历ping服务实例的方式实现检查。该策略在当我们实现的IPing速度不理想，或是
+                Server列表过大时，可能变的不是很为理想，这时候我们需要通过实现IPingStrategy接口并实现pingServers(IPing ping, Server[] servers)函数去扩展
+                ping的执行策略
+        3.3.5：定义了负载均衡的处理规则IRule对象，从BaseLoadBalancer中chooseServer(Object key)的实现源码，我们可以知道负载均衡器实际进行服务实例选择任务
+            是委托给了IRule实例中的choose函数来实现。而在这里，默认初始化了RoundRobinRule为IRule的实现对象。RoundRobinRule实现了最基本且常用的线性负载均
+            衡规则。
+        3.3.6：启动ping任务：在BaseLoadBalancer的默认构造函数中，会直接启动一个用于定时检查Server是否健康的任务。该任务默认的执行间隔为：10秒
+        3.3.7：addServers(List newServers)：向负载均衡器中增加新的服务实例列表，该实现将原本已经维护着的所有服务实例清单allServerList和新传入的服务实例
+            清单newServers都加入到newList中，然后通过调用setServersList函数对newList进行处理，在BaseLoadBalancer中实现的时候会使用新的列表覆盖旧的列表
+        3.3.8：markServerDown(Server server)：标记某个服务实例暂停服务
+        3.3.9：getReachableServers()：获取可用的服务实例列表。由于BaseLoadBalancer中单独维护了一个正常服务的实例清单，所以直接返回即可。
+        3.3.10：getAllServers()：获取所有的服务实例列表。由于BaseLoadBalancer中单独维护了一个所有服务的实例清单，所以也直接返回它即可。
+    3.4：DynamicServerListLoadBalancer类继承于BaseLoadBalancer类：
+        3.4.1：实现了服务实例清单的在运行期的动态更新能力；同时，它还具备了对服务实例清单的过滤功能，也就是说我们可以通过过滤器来选择性的获取一批服务实例
+            清单
+        3.4.2：ServerList接口：
+            1：getInitialListOfServers用于获取初始化的服务实例清单
+            2：getUpdatedListOfServers用于获取更新的服务实例清单
+        3.4.3：EurekaRibbonClientConfiguration类中看到创建ServerList实例，是由DiscoveryEnabledNIWSServerList创建的，DiscoveryEnabledNIWSServerList类中的一个
+            私有函数obtainServersViaDiscovery来通过服务发现机制来实现服务实例的获取
+            1：主要依靠EurekaClient从服务注册中心中获取到具体的服务实例InstanceInfo列表
+            2：这里传入的vipAddress可以理解为逻辑上的服务名，比如“USER-SERVICE”
+            3：对这些服务实例进行遍历，将状态为“UP”（正常服务）的实例转换成DiscoveryEnabledServer对象，最后将这些实例组织成列表返回
+            4：返回的List列表中的元素，转换成内部定义的DiscoveryEnabledServer的子类对象DomainExtractingServer，在该对象的构造函数中将为服务实例对象设置一些
+                必要的属性，比如id、zone、isAliveFlag、readyToServe等信息。
+        3.4.4：ServerListUpdater接口：
+            1：如何触发向Eureka Server去获取服务实例清单以及如何在获取到服务实例清单后更新本地的服务实例清单的呢？
+            2：ServerListUpdater内部还定义了一个UpdateAction接口，上面定义的updateAction对象就是以匿名内部类的方式创建了一个它的具体实现，其中doUpdate实现的
+                内容就是对ServerList的具体更新操作
+            3：PollingServerListUpdater：动态服务列表更新的默认策略，也就是说DynamicServerListLoadBalancer负载均衡器中的默认实现就是它，它通过定时任务的方式
+                进行服务列表的更新
+                3.1：先创建了一个Runnable的线程实现，在该实现中调用了上面提到的具体更新服务实例列表的方法updateAction.doUpdate()，最后再为这个Runnable的线程
+                    实现启动了一个定时任务来执行。
+                3.2：更新服务实例在初始化之后延迟1秒后开始执行，并以30秒为周期重复执行
+                3.3：它还会记录最后更新时间、是否存活等信息，同时也实现了ServerListUpdater中定义的一些其他操作内容
+            4：EurekaNotificationServerListUpdater：该更新器也可服务于DynamicServerListLoadBalancer负载均衡器，但是它的触发机制与PollingServerListUpdater不同
+                ，它需要利用Eureka的事件监听器来驱动服务列表的更新操作。
+        3.4.5：用到了我们之前提到的ServerList的getUpdatedListOfServers，通过之前的介绍我们已经可以知道这一步实现了从Eureka Server中获取服务可用实例的列表。
+            在获得了服务实例列表之后，这里又将引入一个新的对象filter，追朔该对象的定义，我们可以找到它是ServerListFilter定义的。
+            1：定义了一个方法List getFilteredListOfServers(List servers)，主要用于实现对服务实例列表的过滤，通过传入的服务实例清单，根据一些规则返回过滤后的
+                服务实例清单
+            2：ServerListFilter这个接口的实现如下：
+                2.1：AbstractServerListFilter：这是一个抽象过滤器，在这里定义了过滤时需要的一个重要依据对象LoadBalancerStats，我们在之前介绍过的，该对象存
+                    储了关于负载均衡器的一些属性和统计信息等
+                2.2：ZoneAffinityServerListFilter：该过滤器基于“区域感知（Zone Affinity）”的方式实现服务实例的过滤，也就是说它会根据提供服务的实例所处区
+                    域（Zone）与消费者自身的所处区域（Zone）进行比较，过滤掉那些不是同处一个区域的实例
+                    1：从上面的源码中我们可以看到，对于服务实例列表的过滤是通过
+                        Iterables.filter(servers, this.zoneAffinityPredicate.getServerOnlyPredicate())来实现的，其中判断依据由ZoneAffinityPredicate实现服
+                        务实例与消费者的Zone比较。而在过滤之后，这里并不会马上返回过滤的结果，而是通过shouldEnableZoneAffinity函数来判断是否要启用“区域
+                        感知”的功能，从下面shouldEnableZoneAffinity的实现中，我们可以看到，它使用了LoadBalancerStats的getZoneSnapshot方法来获取这些过滤
+                        后的同区域实例的基础指标（包含了：实例数量、断路器断开数、活动请求数、实例平均负载等），根据一系列的算法求出下面的几个评价值并与
+                        设置的阈值对比（下面的为默认值），若有一个条件符合，就不启用“区域感知”过滤的服务实例清单。这一算法实现对于集群出现区域故障时，
+                        依然可以依靠其他区域的实例进行正常服务提供了完善的高可用保障。同时，通过这里的介绍，我们也可以关联着来理解之前介绍Eureka的时候提
+                        到的对于区域分配设计来保证跨区域故障的高可用问题。
+                    2：blackOutServerPercentage：故障实例百分比（断路器断开数 / 实例数量） >= 0.8
+                    3：activeReqeustsPerServer：实例平均负载 >= 0.6
+                    4：availableServers：可用实例数（实例数量 - 断路器断开数） < 2
+                2.3：DefaultNIWSServerListFilter：
+                    该过滤器完全继承自ZoneAffinityServerListFilter，是默认的NIWS（Netflix Internal Web Service）过滤器。
+                2.4：ServerListSubsetFilter：
+                    该过滤器也继承自ZoneAffinityServerListFilter，它非常适用于拥有大规模服务器集群(上百或更多)的系统。因为它可以产生一个“区域感知”结果
+                        的子集列表，同时它还能够通过比较服务实例的通信失败数量和并发连接数来判定该服务是否健康来选择性的从服务实例列表中剔除那些相对不够
+                        健康的实例。该过滤器的实现主要分为三步：
+                    1：获取“区域感知”的过滤结果，来作为候选的服务实例清单
+                    2：从当前消费者维护的服务实例子集中剔除那些相对不够健康的实例（同时也将这些实例从候选清单中剔除，防止第三步的时候又被选入）
+                    3：在完成剔除后，清单已经少了至少10%（默认值）的服务实例，最后通过随机的方式从候选清单中选出一批实例加入到清单中，以保持服务实例子集
+                        与原来的数量一致，而默认的实例子集数量为20
+                2.5：ZonePreferenceServerListFilter：
+                    1：Spring Cloud整合Eureka和Ribbon时会默认使用该过滤器
+                    2：它实现了通过配置或者Eureka实例元数据的所属区域（Zone）来过滤出同区域的服务实例
+                    3：首先通过父类ZoneAffinityServerListFilter的过滤器来获得“区域感知”的服务实例列表，然后遍历这个结果取出根据消费者配置预设的区域
+                        Zone来进行过滤，如果过滤的结果是空的就直接返回父类获取的结果，如果不为空就返回通过消费者配置的Zone过滤后的结果
+        3.4.6：DynamicServerListLoadBalancer中，我们可以看到它并没有重写选择具体服务实例的chooseServer函数，所以它依然会采用在BaseLoadBalancer中实现的
+            算法，使用RoundRobinRule规则，以线性轮询的方式来选择调用的服务实例，该算法实现简单并没有区域（Zone）的概念，所以它会把所有实例视为一个Zone
+            下的节点来看待，这样就会周期性的产生跨区域（Zone）访问的情况，由于跨区域会产生更高的延迟，这些实例主要以防止区域性故障实现高可用为目的而不
+            能作为常规访问的实例，所以在多区域部署的情况下会有一定的性能问题
+    3.5：ZoneAwareLoadBalancer：
+        3.5.1：是对DynamicServerListLoadBalancer的扩展，他可以避免这样的问题(周期性的产生跨区域（Zone）访问的情况)。那么它是如何实现的呢？
+        3.5.2：在ZoneAwareLoadBalancer中对setServerListForZones的重写如下：可以看到，在该实现中创建了一个ConcurrentHashMap()类型的balancers对象，它将
+            用来存储每个Zone区域对应的负载均衡器，而具体的负载均衡器的创建则是通过下面的第一个循环中调用getLoadBalancer函数来完成，同时在创建负载均衡
+            器的时候会创建它的规则（如果当前实现中没有IRULE的实例，就创建一个AvailabilityFilteringRule规则；如果已经有具体实例，就clone一个），在创建
+            完负载均衡器后又马上调用setServersList函数为其设置对应Zone区域的实例清单。而第二个循环则是对Zone区域中实例清单的检查，看看是否有Zone区域
+            下已经没有实例了，是的话就将balancers中对应Zone区域的实例列表清空，该操作的作用是为了后续选择节点时，防止过时的Zone区域统计信息干扰具体实
+            例的选择算法。
+        3.5.3：当负载均衡器中维护的实例所属Zone区域个数大于1的时候才会执行这里的选择策略，否则还是将使用父类的实现。当Zone区域个数大于1个的时候，它的
+            实现步骤主要如下：
+            1；在确定了某个Zone区域后，则获取对应Zone区域的服务均衡器，并调用chooseServer来选择具体的服务实例，而在chooseServer中将使用IRule接口的
+                choose函数来选择具体的服务实例。在这里IRule接口的实现会使用ZoneAvoidanceRule来挑选出具体的服务实例
+4：负载均衡策略IRule的其他实现：
+    public interface IRule {
+        Server choose(Object var1);
+        void setLoadBalancer(ILoadBalancer var1);
+        ILoadBalancer getLoadBalancer();
+    }
+    4.1：AbstractLoadBalancerRule：
+        负载均衡策略的抽象类，在该抽象类中定义了负载均衡器ILoadBalancer对象，该对象能够在具体实现选择服务策略时，获取到一些负载均衡器中维护的信息来
+            作为分配依据
+    4.2：RandomRule：
+        实现了从服务实例清单中随机选择一个服务实例的功能
+    4.3：RoundRobinRule：
+        该策略实现了按照线性轮询的方式依次选择每个服务实例的功能
+    4.4：RetryRule：
+        实现了一个具备重试机制的实例选择功能，在其内部还定义了一个IRule对象，默认使用了RoundRobinRule实例。而在choose方法中的则实现了对内部定义的策略
+            进行反复尝试的策略，若期间能够选择到具体的服务实例就返回，若选择不到就根据设置的尝试结束时间为阈值（maxRetryMillis参数定义的值 + choose方
+            法开始执行的时间戳），当超过该阈值后就返回null。对选定的负载均衡策略机上重试机制。
+    4.5：WeightedResponseTimeRule：增加了根据实例的运行情况来计算权重，并根据权重来挑选实例，以达到更优的分配效果，它的实现主要有三个核心内容：
+        1：定时任务：策略在初始化的时候会通过启动一个定时任务，用来为每个服务实例计算权重，该任务默认30秒执行一次
+        2：权重计算：
+            根据LoadBalancerStats中记录的每个实例的统计信息，累加所有实例的平均响应时间，得到总平均响应时间totalResponseTime，该值会用于后续的计算
+            为负载均衡器中维护的实例清单逐个计算权重（从第一个开始），计算规则为：weightSoFar + totalResponseTime - 实例的平均响应时间，其中
+                weightSoFar初始化为零，并且每计算好一个权重需要累加到weightSoFar上供下一次计算使用
+        3：以上面的数据为例，进行服务实例的选择，则该方法会从[0, 690)区间中选出一个随机数，比如选出的随机数为230，由于该值位于第二个区间，所以此时就
+            会选择实例B来进行请求
+    4.6：ClientConfigEnabledRoundRobinRule：
+        与RoundRobinRule相同，后面的高级策略均是基于ClientConfigEnabledRoundRobinRule的扩展
+    4.7：BestAvailableRule：
+        过滤掉故障的实例，并找出并发请求数最小的一个，所以该策略的特性是选出最空闲的实例，由于该算法的核心依据是统计对象loadBalancerStats，当其为空的
+            时候，它会采用父类的线性轮询策略。
+    4.8：PredicateBasedRule：
+        先通过子类中实现的Predicate逻辑来过滤一部分服务实例，然后再以线性轮询的方式从过滤后的实例清单中选出一个。对于如何过滤，则需要我们在
+            AbstractServerPredicate的子类去实现apply方法来确定具体的过滤策略了后面我们将要介绍的两个策略就是基于此抽象策略实现，只是它们使用了不同的
+            Predicate实现来完成过滤逻辑以达到不同的实例选择效果
+    4.9：AvailabilityFilteringRule：
+        它继承PredicateBasedRule，所以它也继承了“先过滤清单，再轮询选择”的基本处理逻辑，主要过滤逻辑位于shouldSkipServer方法中，它主要判断服务实例
+            的两项内容：
+            1：是否故障，即断路器是否生效已断开
+            2：实例的并发请求数大于阈值，默认值为$2^{31}$ - 1，该配置我们可通过参数..ActiveConnectionsLimit来修改其中只要有一个满足apply就返回false
+                （代表该节点可能存在故障或负载过高），都不满足就返回true。
+            3：它并没有像父类中那样，先遍历所有的节点进行过滤，然后在过滤后的集合中选择实例。而是先线性的方式选择一个实例，接着用过滤条件来判断该实
+                例是否满足要求，若满足就直接使用该实例，若不满足要求就再选择下一个实例，并检查是否满足要求，如此循环进行，当这个过程重复了10次还是
+                没有找到符合要求的实例，就采用父类的实现方案。
+            4：简单的说，该策略通过线性抽样的方式直接尝试寻找可用且较空闲的实例来使用，优化了父类每次都要遍历所有实例的开销。
+    4.10：ZoneAvoidanceRule：
+        1：它使用了CompositePredicate来进行服务实例清单的过滤。这是一个组合过滤条件，在其构造函数中，它以ZoneAvoidancePredicate为主过滤条件，
+            AvailabilityPredicate为次过滤条件初始化了组合过滤条件的实例
+        2：它完全遵循了父类的过滤主逻辑：“先过滤清单，再轮询选择”。
+        3：每次过滤之后（包括主过滤条件和次过滤条件），都需要判断下面两个条件，只要有一个符合就不再进行过滤，将当前结果返回供线性轮询算法选择：
+            过滤后的实例总数 >= 最小过滤实例数（minimalFilteredServers，默认为1）
+            过滤后的实例比例 > 最小过滤百分比（minimalFilteredPercentage，默认为0）
+========================================================================================
+1:客户端如何判断哪个Server负载较少？
+    1：根据LoadBalancerStats对象中记录的每个实例的平均响应时间(还有其他的统计信息)，累加所有实例的平均响应时间，得到总平均响应时间totalResponseTime
+    2：为负载均衡器中维护的实例清单逐个计算权重（从第一个开始），计算规则为：weightSoFar + totalResponseTime - 实例的平均响应时间，其中weightSoFar初始化
+        为零，并且每计算好一个权重需要累加到weightSoFar上供下一次计算使用。
+    3：举个简单的例子来理解这个计算过程：假设有4个实例A、B、C、D，他们的平均响应时间为：10、40、80、100，所以总响应时间是10 + 40 + 80 + 100 = 230
+        所以实例A、B、C、D的权重分别为：
+            实例A：230 - 10 = 220
+            实例B：220 + （230 - 40）= 410
+            实例C：410 + （230 - 80）= 560
+            实例D：560 + （230 - 100）= 690
+        我们可以得到每个实例的权重区间：
+            实例A：[0, 220]
+            实例B：(220, 410]
+            实例C：(410, 560]
+            实例D：(560，690)
+        从[0, 690)区间中选出一个随机数，比如选出的随机数为230，由于该值位于第二个区间，所以此时就会选择实例B来进行请求
+2：ribbon除了客户端负载均衡外，是否有异常重试机制？比如请求一个服务时，有两个地址，请求一个失败了，然后再重试第二个。如果有的话，如何配置？比如配置是否
+    需要重试，重试几次，什么异常重试，什么异常不能重试等待。
+    ribbon的RetryHandler提供了异常重试机制，但默认是没有开启的，对于ConnectException和SocketTimeoutException类型的异常才会进行失败重试，可以通过下面参数
+        开启异常重试机制。
+        ribbon.MaxAutoRetries=1                     每个实例重试的次数
+        ribbon.MaxAutoRetriesNextServer=1           重试实例的个数
+        ribbon.OkToRetryOnAllOperations=true        开启失败重试机制
+3：ribbon在进行负载均衡时候有默认的balancer和rule，怎样修改使用指定的？
+    3.1：使用@Bean注解，这样是全局生效的
+          @Bean
+          public AbstractLoadBalancerRule getAbstractLoadBalancerRule(){
+            return new BestAvailableRule();
+            //	return new RandomRule();
+          }
+    3.2：在主类上面为某个provider单独的进行设置
+        @RibbonClient(name = "microservice-provider-user",configuration = RibbonRetryConfig.class )
+        public class MovieFeignApplication {
+
+        public class RibbonRetryConfig {
+            @Bean
+            public IRule ribbonRule() {
+                RetryRule rule = new RetryRule();
+                rule.setMaxRetryMillis(5000);
+                return rule;
+            }
+        }
+
+
+
+
+

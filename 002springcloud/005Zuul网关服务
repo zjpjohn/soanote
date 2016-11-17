@@ -6,15 +6,6 @@ https://yq.aliyun.com/articles/60530?spm=5176.100239.blogcont60165.22.BLe1ws    
             服务。通过服务网关统一向外系统提供REST API的过程中，除了具备服务路由、均衡负载功能之外，它还具备了权限控制等功能。Spring Cloud Netflix中的Zuul就
             担任了这样的一个角色，为微服务架构提供了前门保护的作用，同时将权限控制这些较重的非业务逻辑内容迁移到服务路由层面，使得服务集群主体能够具备更高的
             可复用性和可测试性。
-2、测试使用过程：
-     2.1：注册中心上面注册service-A和service-B两个服务
-     2.2：网关服务中，引入依赖spring-cloud-starter-zuul、spring-cloud-starter-eureka，如果不是通过指定serviceId的方式，eureka依赖不需要，但是为了对服务集群细
-            节的透明性，还是用serviceId来避免直接引用url的方式吧。
-     2.3：主类使用@EnableZuulProxy注解开启Zuul
-              @SpringCloudApplication注解，它整合了@SpringBootApplication、@EnableDiscoveryClient、@EnableCircuitBreake，主要目的还是简化配置。
-      2.4：application.properties中配置Zuul应用的基础信息，如：应用名、服务端口等。
-                 spring.application.name=api-gateway
-                 server.port=5555
 2.5：服务路由
          通过服务路由的功能，我们在对外提供服务的时候，只需要通过暴露Zuul中配置的调用地址就可以让调用方统一的来访问我们的服务，而不需要了解具体提供服务的主机
                 信息了。
@@ -81,53 +72,7 @@ https://yq.aliyun.com/articles/60530?spm=5176.100239.blogcont60165.22.BLe1ws    
             生命周期中去校验请求的内容，将原本在对外服务层做的校验前移，保证了微服务的无状态性，同时降低了微服务的测试难度，让服务本身更集中关注业务逻辑的
             处理。实现了断路器，不会因为具体微服务的故障而导致服务网关的阻塞，依然可以对外服务。
 
-================================================================================
-                          周立---zuul：网关服务
-=================================================================================
-1、准备工作：下面配置是不用配置，可以访问注册中心上面所有微服务
-    1.1：为了更贴近生产，我们首先配置Host
-        127.0.0.1 gateway
-    1.2：启动服务：microservice-discovery-eureka
-    1.3：启动服务：microservice-provider-user
-    1.4：新建microservice-api-gateway项目
-        1.4.1：启动类中使用@EnableZuulProxy注解激活zuul
-    1.5：配置文件：application.yml
-        spring:
-          application:
-            name: microservice-api-gateway
-        server:
-          port: 8050
-        eureka:
-          instance:
-            hostname: gateway
-          client:
-            serviceUrl:
-              defaultZone: http://discovery:8761/eureka/
-    1.6测试：
-        http://localhost:8050/microservice-provider-user/1，这样可以访问microservice-provider-user服务中id=1的用户信息
-        结论：http://GATEWAY:GATEWAY_PORT/想要访问的Eureka服务id的小写/**，将会访问到 http://想要访问的Eureka服务id的小写:该服务端口/**
-2、自定义路径访问微服务：
-    2.1：# 下面整个树都非必须，如果不配置，将默认使用 http://GATEWAY:GATEWAY_PORT/想要访问的Eureka服务id的小写/** 路由到：
-        http://想要访问的Eureka服务id的小写:该服务端口/**
-    zuul:
-      routes:
-        user:                                               # 可以随便写，在zuul上面唯一即可；当这里的值 = service-id时，service-id可以不写。
-          path: /user/**                                    # 想要映射到的路径
-          service-id: microservice-provider-user            # Eureka中的serviceId
-    2.2：如何忽略某些服务？
-        如果我们现在只想将microservice-consumer-movie-ribbon服务暴露给外部，microservice-provider-user不想暴露，那么应该怎么办呢？配置如下：
-        zuul:
-          ignored-services: microservice-provider-user          # 需要忽视的服务(配置后将不会被路由)
-          routes:
-            movie:                                              # 可以随便写，在zuul上面唯一即可；当这里的值 = service-id时，service-id可以不写。
-              path: /movie/**                                   # 想要映射到的路径
-              service-id: microservice-consumer-movie-ribbon-with-hystrix    # Eureka中的serviceId
-    2.3：直接使用Zuul而不使用Eureka(可以但是不建议这么做，因为得手动地配置大量URL，不是很方便。)
-        zuul:
-          routes:
-            movie:                        # 可以随便写
-              path: /user/**
-              url: http://localhost:8000/   # path路由到的地址，也就是访问http://localhost:8050/user/**会路由到http://localhost:8000/**
+
 3、客户端一个请求中直接调用多个微服务的缺点：
     3.1：例如，亚马逊的产品最终页要请求数百个微服务。虽然一个客户端可以通过LAN发起很多个请求，但是在公网上这样会很没有效率，这个问题在移动互联网上尤为突出
         。这个方案同时会导致客户端代码非常复杂。
@@ -143,10 +88,40 @@ https://yq.aliyun.com/articles/60530?spm=5176.100239.blogcont60165.22.BLe1ws    
         返回空，也可以返回固定的顶部10个给用户。但是，如果是产品信息服务无响应，那么API Gateway就应该给客户端返回一个错误。
 
 
-
-
-
-
+准备工作
+启动服务：microservice-discovery-eureka
+启动服务：microservice-provider-user
+启动服务：microservice-consumer-movie-ribbon
+如果我们现在只想将microservice-consumer-movie-ribbon服务暴露给外部，microservice-provider-user不想暴露，那么应该怎么办呢？
+依然只是一点小小的配置即可：
+    spring:
+      application:
+        name: microservice-api-gateway
+    server:
+      port: 8050
+    eureka:
+      instance:
+        hostname: gateway
+      client:
+        serviceUrl:
+          defaultZone: http://discovery:8761/eureka/
+    zuul:
+      ignored-services: microservice-provider-user          # 需要忽视的服务(配置后将不会被路由)
+      routes:
+        movie:                                              # 可以随便写，在zuul上面唯一即可；当这里的值 = service-id时，service-id可以不写。
+          path: /movie/**                                   # 想要映射到的路径
+          service-id: microservice-consumer-movie-ribbon-with-hystrix    # Eureka中的serviceId
+    测试结果：
+        URL	结果	备注
+        http://localhost:8050/microservice-provider-user/1	404	说明microservice-provider-user未被路由
+        http://localhost:8050/movie/ribbon/1	{"id":1,"username":"Tom","age":12}	说明microservice-consumer-movie-ribbon被路由了。
+6：总结：
+    client--》zuul的rest api--》consumer(consumer服务的实例id，如果多个的话就起到了负载均衡作用)--》provider(如果多个也起到了负载均衡的作用)，
+        zuul中不能直接访问provider，只能访问consumer，zuul中进行权限校验、访问频率校验、安全认证等，校验通过后在调用consumer(这里面会有断路器，或者组合调用
+        多个provider、分布式事务等在这)
+1：关于服务认证问题：
+    Zuul做API网关对外暴露，把鉴权服务独立出去，当请求到达Zuul的时候，通过调用鉴权服务统一校验，通过的再路由到web服务，而网关内部服务可以在网络层上做内网控制
+        等，这样内部系统访问无状态化，可以更专注于业务逻辑，而且易于测试
 
 
 

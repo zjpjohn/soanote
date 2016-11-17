@@ -1,0 +1,74 @@
+====================================================================================================
+        5、hystrix---熔断器
+====================================================================================================
+1：ribbon或者feign的consumer使用hystrix实现断路器，调用consumer的rest api时候默认会访问provider的，但是如果开启了断路器这就不调用provider了，而是执行consumer
+    端指定的一个方法就返回了。
+ 1、为何使用断路器：
+    cousumer从注册中心获得多个provider的地址列表，在访问这些请求时候，如果失败率达到一个阈值后，就自动开启断路器模式，consumer就不会调用provider了，直接返回
+        一个指定的信息。
+    在微服务架构中，存在着那么多的服务单元，若一个单元出现故障，就会因依赖关系形成故障蔓延，最终导致整个系统的瘫痪，这样的架构相较传统架构就更加的不稳定。为
+        了解决这样的问题，因此产生了断路器模式。在分布式架构中，断路器模式的作用也是类似的，当某个服务单元发生故障之后，通过断路器的故障监控，向调用方返回一
+        个错误响应，而不是长时间的等待。这样就不会使得线程因调用故障服务被长时间占用不释放，避免了故障在分布式系统中的蔓延。在Spring Cloud中使用了Hystrix 来
+        实现断路器的功能。
+    断路器有三个状态 关闭 半开 打开，正常情况下 断路器是关闭状态，当失败率达到一定的程度 断路器就打开 这个时候压根不再去请求远程了，从而防止了系统的级联错误。
+2、ribbon中使用熔断器：
+    2.1：Ribbon中引入Hystrix，pom.xml中引入依赖hystrix依赖
+    2.2:主类中使用@EnableCircuitBreaker注解开启断路器功能
+    2.3:：使用ribbon消费服务的函数上增加@HystrixCommand注解来指定回调方法
+          @HystrixCommand(fallbackMethod = "addServiceFallback")
+           public String addService() {
+           return restTemplate.getForEntity("http://COMPUTE-SERVICE/add?a=10&b=20", String.class).getBody();
+          }
+3、feign中使用断路器：
+    3.1：使用@FeignClient注解中的fallback属性指定回调类
+        @FeignClient(value = "compute-service", fallback = ComputeClientHystrix.class)
+        public interface ComputeClient {
+            @RequestMapping(method = RequestMethod.GET, value = "/add")
+            Integer add(@RequestParam(value = "a") Integer a, @RequestParam(value = "b") Integer b);
+        }
+    3.2：创建回调类ComputeClientHystrix，实现@FeignClient的接口，此时实现的方法就是对应@FeignClient接口中映射的fallback函数。
+        @Component
+        public class ComputeClientHystrix implements ComputeClient {
+            @Override
+            public Integer add(@RequestParam(value = "a") Integer a, @RequestParam(value = "b") Integer b) {
+                return -9999;
+            }
+        }
+4：总结；
+    4.1：熔断器本质是方法级别的，consumer在调用某个方法时候大量出错就对这个方法进行熔断，执行一个设定的方法，ribbon是一个方法一个方法进行指定，feign是
+        指定一个类来实现接口，接口中的每个方法熔断时候就执行这个类中的实现的方法。
+
+
+https://github.com/Netflix/Hystrix/wiki/How-it-Works
+http://hot66hot.iteye.com/blog/2155036
+https://raw.githubusercontent.com/wiki/Netflix/Hystrix/images/collapser-1280.png
+
+为每个依赖关系维护一个小线程池（或信号量）;如果它变满，则发往该依赖的请求将被立即拒绝，而不是排队等候。
+
+电路断开和闭合的精确方式如下：
+    假设电路上的体积满足一定的阈值HystrixCommandProperties.circuitBreakerRequestVolumeThreshold（）
+    并假设错误百分比超过阈值错误百分比HystrixCommandProperties.circuitBreakerErrorThresholdPercentage（）
+    然后断路器从CLOSED转换到OPEN。
+    当它断开时，它会短路所有对断路器的请求。
+    经过一段时间HystrixCommandProperties.circuitBreakerSleepWindowInMilliseconds（），下一个单独的请求被允许通过（这是HALF-OPEN状态）。 如果请求失败，
+        断路器在休眠窗口的持续时间内返回到OPEN状态。 如果请求成功，断路器转换到CLOSED，并且1.中的逻辑再次接管。
+线程池隔离的好处：
+    当失败的客户端再次变得健康时，线程池将清除，应用程序立即恢复健康的性能，而不是当整个Tomcat容器被淹没时的长恢复。
+
+Hysterix主要是使用命令模式构建。在同步调用情况下，每个远程微服务调用被包装在HysterixCommand中，而在异步调用情况下，每个远程服务调用是被包装在一个
+    HysterixObserveableCommand 中。
+Hystrix使用其自己的线程池，这样和主应用服务器线程池隔离，如果调用花费很长时间，会停止调用，不同的命令或命令组能够被配置使用它们各自的线程池，可以隔离不
+    同的服务。
+请求折叠Request collapsing在远程调用被请求之前引入一个很小的等待时间，当它被执行时，会看看在同一个时间窗口是否有重复请求执行，这个时间窗口很短如10ms，这
+    里有一个可选Global'上下文，用来折叠压缩所有当前Tomcat线程中任何用户的所有请求，而'User Request' 上下文则是对当前单个Tomcat线程进行折叠。
+请求折叠适合某个命令以高频率访问，降低线程和网络负载。对于非高频的调用，我们使用请求缓存Request caching，能够保证不同线程不会进行重复冗余的微服务调用，因
+    为通过缓存保证了唯一性，在微重复请求创建和执行一个新的线程时，hystrix能够返回一个缓存的结果，通过重载HystrixCommand or HystrixObserveableCommand 的
+    getCacheKey() 方法可以容易实现缓存。
+
+
+
+
+
+
+
+https://github.com/lizhengliwai/Hystrix/tree/master/hystrix-examples/src/main/java/com/netflix/hystrix/examples/basic

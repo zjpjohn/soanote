@@ -1,0 +1,125 @@
+16：Spring boot中使用log4j记录日志：参见：Chapter4-2-2
+    在pom中需要先排除spring-boot-starter-logging Spring Boot默认的日志框架Logback的依赖，再引入log4j的依赖
+    配置log4j.properties
+        在src/main/resources目录下加入log4j.properties配置文件，就可以开始对应用的日志进行配置使用
+17：Spring Boot中log4j进行多环境不同日志级别的控制：参见Chapter4-2-3
+18：spring boot中通过aop统一处理Web请求的日志：参见chapter4-2-2，4-2-4，比如记录了每个方法的执行时间
+    1：pom.xml中引入spring-boot-starter-aop
+    2：而当我们需要使用CGLIB来实现AOP的时候，需要配置spring.aop.proxy-target-class=true，不然默认使用的是标准Java的实现
+    3：@Aspect定义切面，@Pointcut定义切入点
+    4：ThreadLocal<Long> startTime = new ThreadLocal<>()解决同步线程安全问题
+    5：@Order(i)注解来标识切面的优先级，在切入点前的操作，按order的值由小到大执行，在切入点后的操作，按order的值由大到小执行
+19：log4j实现http请求日志入mongodb：参见Chapter4-2-5
+    1：解决日志分散问题的方案多种多样，扩展log4j实现将日志写入MongoDB。
+    2：pom.xml中引入mongodb-driver
+    3：编写MongoAppender类继承AppenderSkeleton
+    4：我们也可以将日志输出到其他数据库，或者输出到消息队列等待其他后续处理等
+
+20：Spring Boot中的事务管理：参见：Chapter3-3-1
+    1：在Spring Boot中，当我们使用了spring-boot-starter-jdbc或spring-boot-starter-data-jpa依赖的时候，框架会自动默认分别注入DataSourceTransactionManager
+        或JpaTransactionManager。所以我们不需要任何额外配置就可以用@Transactional注解进行事务的使用。
+    2：事务的隔离级别：
+        public enum Isolation {
+            DEFAULT(-1),                    READ_COMMITTED
+            READ_UNCOMMITTED(1),   //该隔离级别表示一个事务可以读取另一个事务修改但还没有提交的数据。该级别不能防止脏读和不可重复读，因此很少使用该隔离级别。
+            READ_COMMITTED(2),  //该隔离级别表示一个事务只能读取另一个事务已经提交的数据。该级别可以防止脏读，这也是大多数情况下的推荐值
+            REPEATABLE_READ(4),//在多次查询之间有新增的数据满足该查询，这些新增的记录也会被忽略。该级别可以防止脏读和不可重复读。
+            SERIALIZABLE(8);//所有的事务依次逐个执行，这样事务之间就完全不可能产生干扰，但是这将严重影响程序的性能
+        }
+    3:传播行为:
+        public enum Propagation {
+            REQUIRED(0),    //如果当前存在事务，则加入该事务；如果当前没有事务，则创建一个新的事务。
+            SUPPORTS(1),    //如果当前存在事务，则加入该事务；如果当前没有事务，则以非事务的方式继续运行
+            MANDATORY(2),   //如果当前存在事务，则加入该事务；如果当前没有事务，则抛出异常。
+            REQUIRES_NEW(3),//创建一个新的事务，如果当前存在事务，则把当前事务挂起
+            NOT_SUPPORTED(4),//以非事务方式运行，如果当前存在事务，则把当前事务挂起
+            NEVER(5),//以非事务方式运行，如果当前存在事务，则抛出异常
+            NESTED(6);//如果当前存在事务，则创建一个事务作为当前事务的嵌套事务来运行；如果当前没有事务，则该取值等价于REQUIRED
+        }
+21:使用Spring Security进行安全控制：参见Chapter4-3-1
+    1：要实现访问控制的方法多种多样，可以通过Aop、拦截器实现，也可以通过框架实现（如：Apache Shiro、Spring Security）。
+    2：pom中引入spring-boot-starter-security
+
+22：Spring Boot中使用JavaMailSender发送邮件：参见Chapter4-5-1
+    1：pom.xml中引入spring-boot-starter-mail
+    2：application.properties中配置邮箱信息
+    3：我们可以直接在需要使用的地方直接@Autowired来引入邮件发送对象JavaMailSender
+    4：利用MimeMessageHelper发送带有附件的邮件
+    5：MimeMessageHelper实现在邮件正文中嵌入静态资源
+    6：模板邮件：使用模板引擎来为各类邮件设置成模板，这样我们只需要在发送时去替换变化部分的参数即可，以velocity为例实现
+
+23：Spring Boot中的注解实现缓存与EhCache使用：参见Chapter-4-4-1
+    1：在pom.xml中引入spring-boot-starter-cache
+    2：在Spring Boot主类中增加@EnableCaching注解开启缓存功能
+    3：在数据访问接口中，增加缓存配置注解，如
+        @CacheConfig(cacheNames = "users")//users是缓存对象的名称
+        public interface UserRepository extends JpaRepository<User, Long> {
+            @Cacheable//返回值将被加入缓存。同时在查询时，会先从缓存中获取，若不存在才再发起对数据库的访问
+            User findByName(String name);
+        }
+        @CachePut：配置于函数上，它每次都会真是调用函数，所以主要用于数据新增和修改操作上。
+        @CacheEvict：配置于函数上，通常用在删除方法上，用来从缓存中移除相应数据。
+    4：在Spring Boot中通过@EnableCaching注解自动化配置合适的缓存管理器（CacheManager），Spring Boot根据下面的顺序去侦测缓存提供者：
+          Generic
+          JCache (JSR-107)
+          EhCache 2.x
+          Hazelcast
+          Infinispan
+          Redis
+          Guava
+          Simple
+          除了按顺序侦测外，我们也可以通过配置属性spring.cache.type来强制指定
+24：使用Redis做集中式缓存：参见：Chapter-4-4-2
+    1：EhCache是进程内的缓存框架，在集群模式下时，各应用服务器之间的缓存都是独立的，因此在不同服务器的进程间会存在缓存不一致的情况。即使EhCache提供了
+        集群环境下的缓存同步策略，但是同步依然需要一定的时间，短暂的缓存不一致依然存在。
+    2：要求高一致性（任何数据变化都能及时的被查询到）的分布式系统和应用中，集中式缓存Redis进行数据缓存比较好
+    3：pom.xml中增加redis的依赖spring-boot-starter-redis
+    4：application.properties中增加redis配置
+    5：Spring Boot会在侦测到存在Redis的依赖并且Redis的配置是可用的情况下，使用RedisCacheManager初始化CacheManager。
+    6：EhCache是进程内的缓存框架，第一次通过select查询出的结果被加入到EhCache缓存中，第二次查询从EhCache取出的对象与第一次查询对象实际上是同一个对象，因此
+        我们在更新age的时候，实际已经更新了EhCache中的缓存对象。
+    7：而Redis的缓存独立存在于我们的Spring应用之外，我们对数据库中数据做了更新操作之后，没有通知Redis去更新相应的内容，因此我们取到了缓存中未修改的数据，导
+        致了数据库与缓存中数据的不一致。
+    8：因此我们在使用缓存的时候，要注意缓存的生命周期，利用好上一篇上提到的几个注解来做好缓存的更新、删除
+    9：在更新age的时候，通过@CachePut来让数据更新操作同步到缓存中，就像下面这样：
+        @CachePut(key = "#p0.name")
+        User save(User user);
+        我们的第一次查询也不是通过select查询获得的，因为在初始化数据的时候，调用save方法时，就已经将这条数据加入了redis缓存中，因此后续的查询就直接从redis中
+            获取了。
+
+25：Spring Boot整合MyBatis注解：参见Chapter3-2-7
+    1：pom.xml中引入mybatis-spring-boot-starter依赖
+    2：在application.properties中配置mysql的连接配置
+    3：创建User映射的操作UserMapper
+        @Mapper
+        public interface UserMapper {
+            @Select("SELECT * FROM USER WHERE NAME = #{name}")
+            User findByName(@Param("name") String name);
+            @Insert("INSERT INTO USER(NAME, AGE) VALUES(#{name}, #{age})")
+            int insert(@Param("name") String name, @Param("age") Integer age);
+        }
+26：Spring Boot整合MyBatis注解配置详解参见：Chapter3-2-8
+    1：http://www.mybatis.org/mybatis-3/zh/java-api.html
+    2：对于“查”操作，往往需要返回一个与数据库实体不同的包装类，那么对于这类情况，就可以通过@Results和@Result注解来进行绑定，
+        @Results({
+            @Result(property = "name", column = "name"),
+            @Result(property = "age", column = "age")
+        })
+        @Select("SELECT name, age FROM user")
+        List<User> findAll();
+
+27：Spring Boot中使用RabbitMQ：参见：Chapter5-2-1
+    1：https://www.rabbitmq.com/download.html rabbitmq的安装
+    2：Rabbit管理，执行rabbitmq-plugins enable rabbitmq_management命令，开启Web管理插件，这样我们就可以通过浏览器来进行管理了。
+    3：打开浏览器并访问：http://localhost:15672/，并使用默认用户guest登录，密码也为guest。我们可以看到如下图的管理页面：
+    4：在pom.xml中引入spring-boot-starter-amqp用于支持RabbitMQ。
+    5：application.properties中配置关于RabbitMQ的连接和用户信息，用户可以回到上面的安装内容，在管理页面中创建用户。
+    6：创建消息生产者Sender，产生一个字符串，并发送到名为hello的队列中。
+    7：创建消息消费者Receiver该消费者实现了对hello队列的消费。
+
+
+
+
+
+
+

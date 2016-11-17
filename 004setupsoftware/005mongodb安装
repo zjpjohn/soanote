@@ -1,0 +1,19 @@
+http://www.cnblogs.com/weiweictgu/p/5517717.html
+
+启动命令：
+./mongod -f /letv/mongodb/mongodb/bin/mongodb.conf
+
+
+
+    $ sudo vim /etc/sysconfig/iptables
+    添加以下内容：
+    -A INPUT -p tcp -m state --state NEW -m tcp --dport 27017 -j ACCEPT
+    保存后重启防火墙：
+    $ sudo service iptables restart
+    这样从其它客户机也可以连接上mysql服务了。
+
+ 二、解决方法：
+    1、mongodb的配置文件中的bind_ip 默认为127.0.0.1，默认只有本机可以连接。
+    此时，需要将bind_ip配置为0.0.0.0，表示接受任何IP的连接，这一步是关键。
+    2、防火墙阻止了27017端口。
+    这一步要根据操作系统来决定如何操作，如果是CentOS 7，默认的防火墙是firewalld, 关闭防火墙的命令为：systemctl stop firewalld
